@@ -19,6 +19,29 @@ if %ERRORLEVEL% == 1 (
 
 REM Create the virtual environment named '.venv'
 python -m venv .venv
+
+mkdir scryfall_bulk_json
+mkdir image_cache
+cd image_cache
+mkdir small
+mkdir normal
+mkdir large
+mkdir png
+mkdir art_crop
+mkdir border_crop
+cd ..
+echo 1 Yahenni, Undying Partisan (CMM) 201>>decklist.txt
+echo 1 Accursed Marauder (MH3) 80>>decklist.txt
+echo 1 Animate Dead (MKC) 125>>decklist.txt
+echo 1 Blood Seeker (ZEN) 80>>decklist.txt
+echo 1 Carrier Thrall (2X2) 72>>decklist.txt
+echo 1 Cartouche of Ambition (AKH) 83>>decklist.txt
+echo 1 Creeping Bloodsucker (J22) 21>>decklist.txt
+echo 1 Crypt Rats (VIS) 55>>decklist.txt
+echo 1 Cult Conscript (DMU) 88>>decklist.txt
+echo 1 Dance of the Dead (ICE) 118>>decklist.txt
+echo 1 Deathgreeter (DDD) 33>>decklist.txt
+echo 1 Death's-Head Buzzard (VMA) 115>>decklist.txt
 echo created venv
 REM Activate the virtual environment
 call .venv\Scripts\activate.bat
@@ -28,11 +51,13 @@ echo Installing required packages...
 REM Install packages from requirements.txt
 pip install -r requirements.txt
 
-echo python decklist_to_pdf.py>RUN.bat
+
+echo call .venv\Scripts\activate.bat >> RUN.bat
+echo python decklist_to_pdf.py >> RUN.bat
 
 echo Setup complete.
 
-start RUN.bat
+call RUN.bat
 
 del requirements.txt
 del "%~f0"

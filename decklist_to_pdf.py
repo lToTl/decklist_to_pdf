@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from logging import Logger
 from time import sleep
 from urllib.request import urlretrieve
 from reportlab.lib.pagesizes import A4
@@ -252,7 +253,7 @@ if __name__ == '__main__':
 
     # Default configuration values
     config = {
-        'bulk_json_path' : 'scryfall_bulk_json/default-cards-20250220101107.json',
+        'bulk_json_path' : '',
         'decklist_path' : 'decklist.txt',
         'backside': 'back.jpg',
         'pdf_path' : 'output.pdf',
@@ -291,6 +292,7 @@ if __name__ == '__main__':
                     config['x_axis_offset'] = parts[1]
 
     if not os.path.exists(config['bulk_json_path']):
+        logging.info("No bulk json file found. Downloading...")
         config['bulk_json_path'] = fetch_bulk_json()
         write_config(config)
 
@@ -306,5 +308,4 @@ if __name__ == '__main__':
 
     logging.info("Creating PDF")
 
-    create_grid_pdf("image_cache/png", "test.pdf", config)
-
+    create_grid_pdf(f"image_cache/{config['image_type']}", "test.pdf", config)
