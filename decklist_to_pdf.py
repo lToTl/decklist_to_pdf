@@ -306,5 +306,5 @@ if __name__ == '__main__':
 
     logging.info("Creating PDF")
 
-    create_grid_pdf("image_cache/png", "test.pdf", config['pdf_path'])
+    create_grid_pdf("image_cache/png", "test.pdf", config)
 
