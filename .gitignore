@@ -169,3 +169,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+test.pdf
+/scryfall_bulk_json
+requirements.txt
+/image_cache
+decklist_to_pdf.ini
+decklist.txt

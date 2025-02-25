@@ -23,6 +23,8 @@ python -m venv .venv
 if exist scryfall_bulk_json ( 
 	call .venv\Scripts\activate.bat
 	python decklist_to_pdf.py
+	pause
+	exit /b 0
 	)
 ELSE (
 	mkdir scryfall_bulk_json
@@ -54,8 +56,7 @@ ELSE (
 	echo Installing required packages...
 
 	REM Install packages from requirements.txt
-	pip install -r requirements.txt
-	del requirements.txt
+	pip install -r reportlab Pillow requests
 
 	echo Setup complete, launching script.
 	python decklist_to_pdf.py
