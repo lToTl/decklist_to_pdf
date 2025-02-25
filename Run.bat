@@ -56,7 +56,7 @@ ELSE (
 	echo Installing required packages...
 
 	REM Install packages from requirements.txt
-	pip install -r reportlab Pillow requests
+	pip install reportlab Pillow requests
 
 	echo Setup complete, launching script.
 	python decklist_to_pdf.py
