@@ -139,11 +139,11 @@ def create_grid_pdf(image_folder, output_filename, conf):
     """
 
     # --- Constants (in mm) ---
-    rectangle_width = 63
-    rectangle_height = 88
+    card_width = 63
+    card_height = 88
     spacing = 2
-    grid_width = 3 * rectangle_width + 2 * spacing
-    grid_height = 3 * rectangle_height + 2 * spacing
+    grid_width = 3 * card_width + 2 * spacing
+    grid_height = 3 * card_height + 2 * spacing
 
     # --- A4 Page Dimensions (in mm) ---
     page_width, page_height = A4
@@ -172,7 +172,8 @@ def create_grid_pdf(image_folder, output_filename, conf):
     while image_index < len(image_files):
         # --- Black Background Rectangle ---
         c.setFillColorRGB(0, 0, 0)  # Black
-        c.rect(grid_x_offset * mm, grid_y_offset * mm, grid_width * mm, grid_height * mm, fill=1)
+        c.setLineWidth(0)
+        c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height  + grid_x_offset + 2*spacing) * mm, fill=1)
 
 
         # --- Draw Grid of Rectangles and Images ---
@@ -182,8 +183,8 @@ def create_grid_pdf(image_folder, output_filename, conf):
                     image_path = os.path.join(image_folder, image_files[image_index])
 
                     # Calculate rectangle position
-                    x = grid_x_offset + col * (rectangle_width + spacing)
-                    y = page_height_mm - (grid_y_offset + (row + 1) * (rectangle_height + spacing) - spacing) # Inverted y-axis
+                    x = grid_x_offset + col * (card_width + spacing)
+                    y = page_height_mm - (grid_y_offset + (row + 1) * (card_height + spacing) - spacing) # Inverted y-axis
 
                     # Draw Rectangle (optional, for debugging/border)
                     #c.setFillColorRGB(1, 1, 1) # White
@@ -195,15 +196,15 @@ def create_grid_pdf(image_folder, output_filename, conf):
                         img_width, img_height = img.size
 
                         # Calculate scaling factor (fit image within rectangle)
-                        scale_x = (rectangle_width * mm) / img_width
-                        scale_y = (rectangle_height * mm) / img_height
+                        scale_x = (card_width * mm) / img_width
+                        scale_y = (card_height * mm) / img_height
                         scale = min(scale_x, scale_y)
 
                         # Calculate centered image position
                         draw_width = img_width * scale
                         draw_height = img_height * scale
-                        draw_x = x * mm + (rectangle_width * mm - draw_width) / 2
-                        draw_y = y * mm + (rectangle_height * mm - draw_height) / 2
+                        draw_x = x * mm + (card_width * mm - draw_width) / 2
+                        draw_y = y * mm + (card_height * mm - draw_height) / 2
 
                         c.drawImage(image_path, draw_x, draw_y, width=draw_width, height=draw_height, mask='auto')
                     except Exception as e:
