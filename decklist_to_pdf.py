@@ -119,9 +119,7 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
                 sleep(0.1)
     logging.info(f"Downloaded {counter} new images")
 
-# TODO: draw_reference_points
-def draw_reference_points(canvas):
-    pass
+
 
 # TODO: rewrite card selection from listing image folder to respecting decklist 'copies' parameter
 # TODO: double sided card placement
@@ -150,10 +148,16 @@ def create_grid_pdf(image_folder, output_filename, conf):
     page_width_mm = page_width / mm
     page_height_mm = page_height / mm
 
-    # --- Calculate Grid Offsets ---
-    grid_x_offset = (page_width_mm - grid_width) / 2
-    grid_y_offset = (page_height_mm - grid_height) / 2
+    x_axis_offset = float(conf["x_axis_offset"])
 
+    # --- Calculate Grid Offsets ---
+    grid_x_offset = ((page_width_mm - grid_width) / 2 ) + x_axis_offset
+    grid_y_offset = ((page_height_mm - grid_height) / 2) 
+    
+    
+    # --- Location marker sets --- 
+    marker_vectors = [[2*mm,2*mm],[-2*mm,-2*mm]]
+    marker_iteration = [[1,1],[1,-1],[-1,-1],[-1,1]]
 
     # --- Get Image Files ---
     image_files = sorted([f for f in os.listdir(image_folder) if os.path.isfile(os.path.join(image_folder, f)) and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])  # Add more extensions if needed
@@ -166,27 +170,25 @@ def create_grid_pdf(image_folder, output_filename, conf):
     c = canvas.Canvas(output_filename, pagesize=A4)
 
     image_index = 0
-    if conf['reference_points']:
-        draw_reference_points(c)
 
     while image_index < len(image_files):
         # --- Black Background Rectangle ---
         c.setFillColorRGB(0, 0, 0)  # Black
         c.setLineWidth(0)
-        c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height  + grid_x_offset + 2*spacing) * mm, fill=1)
+        c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height + 2*spacing) * mm , stroke=0 , fill=1)
 
 
-        # --- Draw Grid of Rectangles and Images ---
+        # --- Calculate Grid Center ---
+        grid_center_x = (page_width)/2 + x_axis_offset*mm
+        grid_center_y = (page_height/2)
         for row in range(3):
             for col in range(3):
                 if image_index < len(image_files):
                     image_path = os.path.join(image_folder, image_files[image_index])
 
-                    # Calculate rectangle position
-                    x = grid_x_offset + col * (card_width + spacing)
-                    y = page_height_mm - (grid_y_offset + (row + 1) * (card_height + spacing) - spacing) # Inverted y-axis
-
                     # Draw Rectangle (optional, for debugging/border)
+                    #c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height  + grid_x_offset + 2*spacing) * mm , stroke=0 ,  fill=1)
+
                     #c.setFillColorRGB(1, 1, 1) # White
                     #c.rect(x * mm, y * mm, rectangle_width * mm, rectangle_height * mm, stroke=1, fill=0)
 
@@ -194,6 +196,11 @@ def create_grid_pdf(image_folder, output_filename, conf):
                     try:
                         img = Image.open(image_path)
                         img_width, img_height = img.size
+
+                        # --- Draw Grid of Rectangles and Images ---
+                        # Calculate rectangle position
+                        x = grid_x_offset + col * (card_width + spacing)
+                        y = page_height_mm - (grid_y_offset + (row + 1) * (card_height + spacing) - spacing) # Inverted y-axis
 
                         # Calculate scaling factor (fit image within rectangle)
                         scale_x = (card_width * mm) / img_width
@@ -209,9 +216,13 @@ def create_grid_pdf(image_folder, output_filename, conf):
                         c.drawImage(image_path, draw_x, draw_y, width=draw_width, height=draw_height, mask='auto')
                     except Exception as e:
                         print(f"Error processing image {image_path}: {e}") # Handle image loading errors
-
                     image_index += 1
-
+        # Draw_reference_points
+        if conf['reference_points']:
+            for iterator_vectors in marker_iteration:
+                for vector in marker_vectors:
+                    c.rect(grid_center_x + iterator_vectors[0] * grid_width * mm/2 , grid_center_y + iterator_vectors[1] * (grid_height + 10)*mm/2 , vector[0] , vector[1] , stroke=0 , fill=1)
+  
         c.showPage()  # Move to the next page
     c.save()
     print(f"PDF created: {output_filename}")
