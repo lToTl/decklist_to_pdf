@@ -175,3 +175,4 @@ requirements.txt
 /image_cache
 decklist_to_pdf.ini
 decklist.txt
+Output.pdf

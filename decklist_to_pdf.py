@@ -56,7 +56,8 @@ def read_decklist(filepath, backside):
             name = decklist_line[decklist_line.index(" ") + 1:decklist_line.index("(") - 1]
             set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
             set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):-1]
-            decklist.append((copies, name, set_symbol, set_number))
+            for i in range(copies):
+                decklist.append((copies, name, set_symbol, set_number))
     return decklist
 
 def fetch_bulk_json():
@@ -125,7 +126,7 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
 # TODO: double sided card placement
 # TODO: x_axis_offset
 # TODO: Bleed edge mode
-def create_grid_pdf(image_folder, output_filename, conf):
+def create_grid_pdf(image_folder, output_filename,deck, conf):
     """
     Generates a PDF with A4 pages, each containing a 3x3 grid of rectangles.
     Each rectangle displays an image from the specified folder.
@@ -165,11 +166,13 @@ def create_grid_pdf(image_folder, output_filename, conf):
     if not image_files:
         print("No images found in the specified folder.")
         return
+    
 
     # --- Create PDF ---
     c = canvas.Canvas(output_filename, pagesize=A4)
 
     image_index = 0
+    copy_counter = 0
 
     while image_index < len(image_files):
         # --- Black Background Rectangle ---
@@ -181,6 +184,17 @@ def create_grid_pdf(image_folder, output_filename, conf):
         # --- Calculate Grid Center ---
         grid_center_x = (page_width)/2 + x_axis_offset*mm
         grid_center_y = (page_height/2)
+
+        # --- Calculate Rectangle Position ---
+        card_positions = []
+        for row in range(3):
+            card_positions.append([])
+            for col in range(3):
+                x = grid_x_offset + col * (card_width + spacing)
+                y = page_height_mm - (grid_y_offset + (row + 1) * (card_height + spacing) - spacing)
+                card_positions[row].append([x, y])
+
+
         for row in range(3):
             for col in range(3):
                 if image_index < len(image_files):
@@ -198,9 +212,6 @@ def create_grid_pdf(image_folder, output_filename, conf):
                         img_width, img_height = img.size
 
                         # --- Draw Grid of Rectangles and Images ---
-                        # Calculate rectangle position
-                        x = grid_x_offset + col * (card_width + spacing)
-                        y = page_height_mm - (grid_y_offset + (row + 1) * (card_height + spacing) - spacing) # Inverted y-axis
 
                         # Calculate scaling factor (fit image within rectangle)
                         scale_x = (card_width * mm) / img_width
@@ -210,8 +221,8 @@ def create_grid_pdf(image_folder, output_filename, conf):
                         # Calculate centered image position
                         draw_width = img_width * scale
                         draw_height = img_height * scale
-                        draw_x = x * mm + (card_width * mm - draw_width) / 2
-                        draw_y = y * mm + (card_height * mm - draw_height) / 2
+                        draw_x = card_positions[row][col][0] * mm + (card_width * mm - draw_width) / 2
+                        draw_y = card_positions[row][col][1] * mm + (card_height * mm - draw_height) / 2
 
                         c.drawImage(image_path, draw_x, draw_y, width=draw_width, height=draw_height, mask='auto')
                     except Exception as e:
@@ -313,11 +324,11 @@ if __name__ == '__main__':
 
     logging.info(f"Reading decklist from {config['decklist_path']}")
     deck_data = read_decklist(config['decklist_path'], config['backside'])
-    logging.info(f"Found {len(deck_data)} unique cards in decklist")
+    logging.info(f"Found {len(deck_data)} enties in decklist")
 
     logging.info("Checking image cache")
     create_image_cache(image_type=config['image_type'], card_data=card_dictionary, decklist=deck_data)
 
     logging.info("Creating PDF")
 
-    create_grid_pdf(f"image_cache/{config['image_type']}", "test.pdf", config)
+    create_grid_pdf(f"image_cache/{config['image_type']}", "Output.pdf", deck_data, config)
