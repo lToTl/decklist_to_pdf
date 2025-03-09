@@ -48,7 +48,7 @@ def load_card_dictionary(filepath):
     return card_dict
 
 # TODO: double sided format
-def read_decklist(filepath, backside):
+def read_decklist(filepath, card_data):
     decklist = []
     with open(filepath, 'r', encoding='utf-8') as decklist_file:
         for decklist_line in decklist_file:
@@ -56,8 +56,12 @@ def read_decklist(filepath, backside):
             name = decklist_line[decklist_line.index(" ") + 1:decklist_line.index("(") - 1]
             set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
             set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):-1]
-            for i in range(copies):
-                decklist.append((copies, name, set_symbol, set_number))
+            two_sided = False
+            layout = card_data[f"{set_symbol}-{set_number}"]['layout']
+            if layout == "transform" or layout == "modal_dfc" or layout == "double_faced_token":
+                two_sided = True
+            entry = {'copies': copies, 'name': name, 'set_symbol': set_symbol, 'set_number': set_number, 'two_sided': two_sided}
+            decklist.append(entry)
     return decklist
 
 def fetch_bulk_json():
@@ -90,13 +94,14 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
     counter = 0
     with ThreadPoolExecutor(max_workers=12) as executor:
         for decklist_line in decklist:
-            name = decklist_line[1]
-            set_symbol = decklist_line[2]
-            set_number = decklist_line[3]
+            name = decklist_line['name']
+            set_symbol = decklist_line['set_symbol']
+            set_number = decklist_line['set_number']
+            layout = card_data[f"{set_symbol}-{set_number}"]['layout']
+            
             if not (os.path.exists(f"image_cache/{image_type}/{set_symbol}-{set_number}.{image_format}") or
-                    os.path.exists(f"image_cache/{image_type}/{set_symbol}-{set_number}_A.{image_format}")):
+                (os.path.exists(f"image_cache/{image_type}/{set_symbol}-{set_number}_A.{image_format}"))):
 
-                layout = card_data[f"{set_symbol}-{set_number}"]['layout']
 
                 if layout == "normal" or layout == "token" or layout == "split" or layout == "flip":
                     logging.info(f"Downloading {name} -> {set_symbol}-{set_number}.{image_format}")
@@ -104,20 +109,27 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
                     destination = f"image_cache/{image_type}/{set_symbol}-{set_number}.{image_format}"
                     executor.submit(fetch_image, image_uri, destination)
                     counter += 1
+                    sleep(0.1)
+                    continue
 
-                if layout == "transform" or layout == "modal_dfc":
+                if layout == "transform" or layout == "modal_dfc" or layout == "double_faced_token":
                     logging.info(logging.info(f"Downloading {name} -> {set_symbol}-{set_number}_A.{image_format}"))
                     image_uri = card_data[f"{set_symbol}-{set_number}"]['card_faces'][0]['image_uris'][image_type]
                     destination = f"image_cache/{image_type}/{set_symbol}-{set_number}_A.{image_format}"
                     executor.submit(fetch_image, image_uri, destination)
                     counter += 1
+                    sleep(0.1)
 
                     logging.info(logging.info(f"Downloading {name} -> {set_symbol}-{set_number}_B.{image_format}"))
                     image_uri = card_data[f"{set_symbol}-{set_number}"]['card_faces'][1]['image_uris'][image_type]
                     destination = f"image_cache/{image_type}/{set_symbol}-{set_number}_B.{image_format}"
                     executor.submit(fetch_image, image_uri, destination)
                     counter += 1
-                sleep(0.1)
+                    sleep(0.1)
+                    continue
+                raise Exception(f"Unknown card layout {layout}")
+                
+                
     logging.info(f"Downloaded {counter} new images")
 
 
@@ -126,7 +138,7 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
 # TODO: double sided card placement
 # TODO: x_axis_offset
 # TODO: Bleed edge mode
-def create_grid_pdf(image_folder, output_filename,deck, conf):
+def create_grid_pdf(image_folder, output_filename, deck, conf):
     """
     Generates a PDF with A4 pages, each containing a 3x3 grid of rectangles.
     Each rectangle displays an image from the specified folder.
@@ -136,7 +148,9 @@ def create_grid_pdf(image_folder, output_filename,deck, conf):
         :param output_filename: The name of the PDF file to be created.
         :param conf: configuration dictionary.
     """
-
+    image_format = '.png'
+    if conf['image_type'] != 'png':
+        image_format = '.jpg'
     # --- Constants (in mm) ---
     card_width = 63
     card_height = 88
@@ -161,82 +175,110 @@ def create_grid_pdf(image_folder, output_filename,deck, conf):
     marker_iteration = [[1,1],[1,-1],[-1,-1],[-1,1]]
 
     # --- Get Image Files ---
-    image_files = sorted([f for f in os.listdir(image_folder) if os.path.isfile(os.path.join(image_folder, f)) and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])  # Add more extensions if needed
+    #image_files = sorted([f for f in os.listdir(image_folder) if os.path.isfile(os.path.join(image_folder, f)) and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])  # Add more extensions if needed
 
-    if not image_files:
-        print("No images found in the specified folder.")
-        return
+    #if not image_files:
+    #    print("No images found in the specified folder.")
+    #    return
     
 
-    # --- Create PDF ---
-    c = canvas.Canvas(output_filename, pagesize=A4)
+    # --- Calculate Grid Center ---
+    grid_center_x = (page_width)/2 + x_axis_offset*mm
+    grid_center_y = (page_height/2)
+
+    # --- Calculate Card Positions ---
+    card_positions = []
+    for row in range(3):
+        card_positions.append([])
+        for pos in range(3):
+            x = grid_x_offset + pos * (card_width + spacing)
+            y = page_height_mm - (grid_y_offset + (row + 1) * (card_height + spacing) - spacing)
+            card_positions[row].append([x, y])
+    
+    
 
     image_index = 0
-    copy_counter = 0
+    card_index = 0
+    deck_size = 0 
+    for card in deck: deck_size += card['copies']
+    image_name = ""
+    working_on = 0
+    sides = 1
+    do_B_side_next = False
+    if conf['two_sided']: sides = 2
+    while working_on < sides:
+            # --- Create PDF ---
+        c = canvas.Canvas(output_filename, pagesize=A4)
+        while card_index < len(deck):
+            # --- Black Background Rectangle ---
+            c.setFillColorRGB(0, 0, 0)  # Black
+            c.setLineWidth(0)
+            c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height + 2*spacing) * mm , stroke=0 , fill=1)
+            copy_counter = 0
+            for row in card_positions:
+                for i  in range(3):
 
-    while image_index < len(image_files):
-        # --- Black Background Rectangle ---
-        c.setFillColorRGB(0, 0, 0)  # Black
-        c.setLineWidth(0)
-        c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height + 2*spacing) * mm , stroke=0 , fill=1)
+                    if card_index < len(deck):
+                        image_name = deck[card_index]['set_symbol'] + "-" + deck[card_index]['set_number']
 
+                        if (deck[card_index]['two_sided'] and working_on == 0) or (not conf['two_sided'] and deck[card_index]['two_sided'] and not do_B_side_next):
+                            image_name += "_A"
+                            do_B_side_next = True
+                        if (deck[card_index]['two_sided'] and working_on == 1) or (not conf['two_sided'] and deck[card_index]['two_sided'] and do_B_side_next):
+                            image_name += "_B"
+                            do_B_side_next = False
+                        if conf['custom_backside'] and working_on == 1:
+                            image_name = conf['backside']
+                            image_path = os.path.join('cardbacks', conf['cardback'])
+                        else:image_path = os.path.join(image_folder, image_name + image_format)
 
-        # --- Calculate Grid Center ---
-        grid_center_x = (page_width)/2 + x_axis_offset*mm
-        grid_center_y = (page_height/2)
+                        # Draw Rectangle (optional, for debugging/border)
+                        #c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height  + grid_x_offset + 2*spacing) * mm , stroke=0 ,  fill=1)
 
-        # --- Calculate Rectangle Position ---
-        card_positions = []
-        for row in range(3):
-            card_positions.append([])
-            for col in range(3):
-                x = grid_x_offset + col * (card_width + spacing)
-                y = page_height_mm - (grid_y_offset + (row + 1) * (card_height + spacing) - spacing)
-                card_positions[row].append([x, y])
+                        #c.setFillColorRGB(1, 1, 1) # White
+                        #c.rect(x * mm, y * mm, rectangle_width * mm, rectangle_height * mm, stroke=1, fill=0)
+                        
+                        # --- Image Placement ---
+                        try:
+                            img = Image.open(image_path)
+                            img_width, img_height = img.size
 
+                            # --- Draw Grid of Images ---
 
-        for row in range(3):
-            for col in range(3):
-                if image_index < len(image_files):
-                    image_path = os.path.join(image_folder, image_files[image_index])
+                            # Calculate scaling factor (fit image within rectangle)
+                            scale_x = (card_width * mm) / img_width
+                            scale_y = (card_height * mm) / img_height
+                            scale = min(scale_x, scale_y)
 
-                    # Draw Rectangle (optional, for debugging/border)
-                    #c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height  + grid_x_offset + 2*spacing) * mm , stroke=0 ,  fill=1)
+                            # Calculate centered image position
+                            draw_width = img_width * scale
+                            draw_height = img_height * scale
+                            xindex = i
+                            if conf['two_sided'] and working_on == 1: xindex = 2 - i
+                            draw_x = row[xindex][0] * mm + (card_width * mm - draw_width) / 2
+                            draw_y = row[i][1] * mm + (card_height * mm - draw_height) / 2
+                            
+                            c.drawImage(image_path, draw_x, draw_y, width=draw_width, height=draw_height, mask='auto')
+                        except Exception as e:
+                            print(f"Error processing image {image_path}: {e}") # Handle image loading errors
 
-                    #c.setFillColorRGB(1, 1, 1) # White
-                    #c.rect(x * mm, y * mm, rectangle_width * mm, rectangle_height * mm, stroke=1, fill=0)
-
-                    # --- Image Placement ---
-                    try:
-                        img = Image.open(image_path)
-                        img_width, img_height = img.size
-
-                        # --- Draw Grid of Rectangles and Images ---
-
-                        # Calculate scaling factor (fit image within rectangle)
-                        scale_x = (card_width * mm) / img_width
-                        scale_y = (card_height * mm) / img_height
-                        scale = min(scale_x, scale_y)
-
-                        # Calculate centered image position
-                        draw_width = img_width * scale
-                        draw_height = img_height * scale
-                        draw_x = card_positions[row][col][0] * mm + (card_width * mm - draw_width) / 2
-                        draw_y = card_positions[row][col][1] * mm + (card_height * mm - draw_height) / 2
-
-                        c.drawImage(image_path, draw_x, draw_y, width=draw_width, height=draw_height, mask='auto')
-                    except Exception as e:
-                        print(f"Error processing image {image_path}: {e}") # Handle image loading errors
-                    image_index += 1
-        # Draw_reference_points
-        if conf['reference_points']:
-            for iterator_vectors in marker_iteration:
-                for vector in marker_vectors:
-                    c.rect(grid_center_x + iterator_vectors[0] * grid_width * mm/2 , grid_center_y + iterator_vectors[1] * (grid_height + 10)*mm/2 , vector[0] , vector[1] , stroke=0 , fill=1)
-  
-        c.showPage()  # Move to the next page
-    c.save()
-    print(f"PDF created: {output_filename}")
+                        # --- count up copy_counter if needed ---
+                        if deck[card_index]['two_sided'] and (not conf['two_sided'] or conf['custom_backside']):
+                            if working_on == 0 and not do_B_side_next:
+                                copy_counter += 1
+                        # --- count up card_index if needed ---
+                        if copy_counter == deck[card_index]["copies"] : 
+                            copy_counter = 0
+                            card_index += 1
+            # Draw_reference_points
+            if conf['reference_points']:
+                for iterator_vectors in marker_iteration:
+                    for vector in marker_vectors:
+                        c.rect(grid_center_x + iterator_vectors[0] * grid_width * mm/2 , grid_center_y + iterator_vectors[1] * (grid_height + 10)*mm/2 , vector[0] , vector[1] , stroke=0 , fill=1)
+    
+            c.showPage()  # Move to the next page
+        c.save()
+        print(f"PDF created: {output_filename}")
 
 
 def write_config(conf):
@@ -251,6 +293,10 @@ bulk_json_path:{conf['bulk_json_path']}
 # copies name (SET) collector_number | (SET) collector_number
 decklist_path:{conf['decklist_path']}
 
+# two sided printing
+two_sided: {conf['two_sided']}
+# has custom backside
+custom_backside: {conf['custom_backside']} 
 # default backside image
 backside:{conf['backside']}
 
@@ -278,7 +324,9 @@ if __name__ == '__main__':
     config = {
         'bulk_json_path' : '',
         'decklist_path' : 'decklist.txt',
-        'backside': 'back.jpg',
+        'two_sided': False,
+        'custom_backside': False,
+        'backside': 'back.png',
         'pdf_path' : 'output.pdf',
         'image_type' : 'png',
         'mode' : 'default',
@@ -291,7 +339,9 @@ if __name__ == '__main__':
         write_config(config)
 
     logging.info("Loading configuration from decklist_to_pdf.ini")
+    
     with open("decklist_to_pdf.ini", "r") as f:
+        conf_count = 0
         for line in f:
             if line[0] == '#':
                 continue
@@ -299,21 +349,38 @@ if __name__ == '__main__':
             match parts[0]:
                 case 'bulk_json_path':
                     config['bulk_json_path'] = parts[1]
+                    conf_count += 1
                 case 'decklist_path':
                     config['decklist_path'] = parts[1]
+                    conf_count += 1
                 case 'backside':
                     config['backside'] = parts[1]
+                    conf_count += 1
                 case 'pdf_path':
                     config['pdf_path'] = parts[1]
+                    conf_count += 1
                 case 'image_type':
                     config['image_type'] = parts[1]
+                    conf_count += 1
                 case 'mode':
                     config['mode'] = parts[1]
+                    conf_count += 1
                 case 'reference_points':
-                    config['reference_points'] = parts[1]
+                    config['reference_points'] = parts[1] == 'True'
+                    conf_count += 1
                 case 'x_axis_offset':
                     config['x_axis_offset'] = parts[1]
-
+                    conf_count += 1
+                case 'two_sided':
+                    config['two_sided'] = parts[1] == 'True'
+                    conf_count += 1
+                case 'custom_backside':
+                    config['custom_backside'] = parts[1] == 'True'
+                    conf_count += 1
+        if conf_count < 10:
+            logging.error("Old configu=ration file detected. Regenerating default gonfig.")
+            write_config(config)
+        
     if not os.path.exists(config['bulk_json_path']):
         logging.info("No bulk json file found. Downloading...")
         config['bulk_json_path'] = fetch_bulk_json()
@@ -323,7 +390,7 @@ if __name__ == '__main__':
     card_dictionary = load_card_dictionary(config['bulk_json_path'])
 
     logging.info(f"Reading decklist from {config['decklist_path']}")
-    deck_data = read_decklist(config['decklist_path'], config['backside'])
+    deck_data = read_decklist(config['decklist_path'], card_dictionary)
     logging.info(f"Found {len(deck_data)} enties in decklist")
 
     logging.info("Checking image cache")

@@ -28,6 +28,7 @@ if exist scryfall_bulk_json (
 	)
 ELSE (
 	mkdir scryfall_bulk_json
+	mkdir cardbacks
 	mkdir image_cache
 	cd image_cache
 	mkdir small
