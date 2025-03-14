@@ -56,6 +56,9 @@ def read_decklist(filepath, card_data):
             name = decklist_line[decklist_line.index(" ") + 1:decklist_line.index("(") - 1]
             set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
             set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):-1]
+            if decklist_line[-1] != '\n':
+                set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):]
+            print(f"{name} {set_number} " + str(decklist_line[::-1].index(" ")) + " " + str(len(decklist_line)))
             two_sided = False
             layout = card_data[f"{set_symbol}-{set_number}"]['layout']
             if layout == "transform" or layout == "modal_dfc" or layout == "double_faced_token":
@@ -134,9 +137,6 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
 
 
 
-# TODO: rewrite card selection from listing image folder to respecting decklist 'copies' parameter
-# TODO: double sided card placement
-# TODO: x_axis_offset
 # TODO: Bleed edge mode
 def create_grid_pdf(image_folder, output_filename, deck, conf):
     """
