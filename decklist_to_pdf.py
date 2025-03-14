@@ -55,10 +55,7 @@ def read_decklist(filepath, card_data):
             copies = int(decklist_line[:decklist_line.index(" ")])
             name = decklist_line[decklist_line.index(" ") + 1:decklist_line.index("(") - 1]
             set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
-            set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):-1]
-            if decklist_line[-1] != '\n':
-                set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):]
-            print(f"{name} {set_number} " + str(decklist_line[::-1].index(" ")) + " " + str(len(decklist_line)))
+            set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):-1].srip()
             two_sided = False
             layout = card_data[f"{set_symbol}-{set_number}"]['layout']
             if layout == "transform" or layout == "modal_dfc" or layout == "double_faced_token":
