@@ -55,7 +55,7 @@ def read_decklist(filepath, card_data):
             copies = int(decklist_line[:decklist_line.index(" ")])
             name = decklist_line[decklist_line.index(" ") + 1:decklist_line.index("(") - 1]
             set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
-            set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):-1].srip()
+            set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):-1].strip()
             two_sided = False
             layout = card_data[f"{set_symbol}-{set_number}"]['layout']
             if layout == "transform" or layout == "modal_dfc" or layout == "double_faced_token":
@@ -221,9 +221,10 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                         if (deck[card_index]['two_sided'] and working_on == 0) or (not conf['two_sided'] and deck[card_index]['two_sided'] and not do_B_side_next):
                             image_name += "_A"
                             do_B_side_next = True
-                        if (deck[card_index]['two_sided'] and working_on == 1) or (not conf['two_sided'] and deck[card_index]['two_sided'] and do_B_side_next):
-                            image_name += "_B"
-                            do_B_side_next = False
+                        else: 
+                            if (deck[card_index]['two_sided'] and working_on == 1) or (not conf['two_sided'] and deck[card_index]['two_sided'] and do_B_side_next):
+                                image_name += "_B"
+                                do_B_side_next = False
                         if conf['custom_backside'] and working_on == 1:
                             image_name = conf['backside']
                             image_path = os.path.join('cardbacks', conf['cardback'])
