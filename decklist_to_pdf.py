@@ -1,7 +1,8 @@
+import urllib
 from concurrent.futures import ThreadPoolExecutor
 from logging import Logger
 from time import sleep
-from urllib.request import urlretrieve
+from urllib.request import urlretrieve, Request
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
@@ -64,19 +65,25 @@ def read_decklist(filepath, card_data):
             decklist.append(entry)
     return decklist
 
-def fetch_bulk_json():
-    response = requests.get('https://api.scryfall.com/bulk-data/default-cards')
+def fetch_bulk_json(user_agent, accept):
+    headers = {'User-Agent': user_agent,
+               'Accept': accept}
+    response = requests.get('https://api.scryfall.com/bulk-data/default-cards', headers=headers)
     response.raise_for_status()
     json_response = response.json()
     bulk_json_uri = json_response['download_uri']
     local_filename = f"scryfall_bulk_json/{bulk_json_uri.split('/')[-1]}"
-    urlretrieve(bulk_json_uri, local_filename)
+
+    request = Request(bulk_json_uri, headers={'User-Agent': user_agent, 'Accept': accept})
+    with urllib.request.urlopen(request) as response, open(local_filename, 'wb') as out_file:
+        out_file.write(response.read())
     return local_filename
 
 
-
-def fetch_image(image_url,  destination):
-    img_data = requests.get(image_url).content
+def fetch_image(image_url,  destination, user_agent, accept):
+    headers = {'User-Agent': user_agent,
+               'Accept': accept}
+    img_data = requests.get(image_url, headers=headers).content
     with open(destination, 'wb') as image_file:
         image_file.write(img_data)
 
@@ -107,7 +114,7 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
                     logging.info(f"Downloading {name} -> {set_symbol}-{set_number}.{image_format}")
                     image_uri = card_data[f"{set_symbol}-{set_number}"]['image_uris'][image_type]
                     destination = f"image_cache/{image_type}/{set_symbol}-{set_number}.{image_format}"
-                    executor.submit(fetch_image, image_uri, destination)
+                    executor.submit(fetch_image, image_uri, destination, config['user_agent'], config['accept'])
                     counter += 1
                     sleep(0.1)
                     continue
@@ -116,14 +123,14 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
                     logging.info(logging.info(f"Downloading {name} -> {set_symbol}-{set_number}_A.{image_format}"))
                     image_uri = card_data[f"{set_symbol}-{set_number}"]['card_faces'][0]['image_uris'][image_type]
                     destination = f"image_cache/{image_type}/{set_symbol}-{set_number}_A.{image_format}"
-                    executor.submit(fetch_image, image_uri, destination)
+                    executor.submit(fetch_image, image_uri, destination, config['user_agent'], config['accept'])
                     counter += 1
                     sleep(0.1)
 
                     logging.info(logging.info(f"Downloading {name} -> {set_symbol}-{set_number}_B.{image_format}"))
                     image_uri = card_data[f"{set_symbol}-{set_number}"]['card_faces'][1]['image_uris'][image_type]
                     destination = f"image_cache/{image_type}/{set_symbol}-{set_number}_B.{image_format}"
-                    executor.submit(fetch_image, image_uri, destination)
+                    executor.submit(fetch_image, image_uri, destination, config['user_agent'], config['accept'])
                     counter += 1
                     sleep(0.1)
                     continue
@@ -319,7 +326,14 @@ mode:{conf['mode']}
 reference_points:{conf['reference_points']}
 
 # move everything on the x_axis
-x_axis_offset:{conf['x_axis_offset']}""")
+x_axis_offset:{conf['x_axis_offset']}
+
+# user agent for scryfall bulk json download
+user_agent:{conf['user_agent']}
+
+# accept header for scryfall bulk json download
+accept:{conf['accept']}
+""")
 
 
 if __name__ == '__main__':
@@ -336,7 +350,9 @@ if __name__ == '__main__':
         'image_type' : 'png',
         'mode' : 'default',
         'reference_points' : True,
-        'x_axis_offset' : 0
+        'x_axis_offset' : 0,
+        'user_agent': 'decklist_to_pdf/0.1',
+        'accept': 'application/json;q=0.9,*/*;q=0.8'
     }
 
 
@@ -382,13 +398,18 @@ if __name__ == '__main__':
                 case 'custom_backside':
                     config['custom_backside'] = parts[1] == 'True'
                     conf_count += 1
-        if conf_count < 10:
-            logging.error("Old configu=ration file detected. Regenerating default gonfig.")
+                case 'user_agent':
+                    config['user_agent'] = parts[1]
+                    conf_count += 1
+                case 'accept':
+                    config['accept'] = parts[1]
+        if conf_count < 12:
+            logging.error("Old configu=ration file detected. Regenerating default config.")
             write_config(config)
         
     if not os.path.exists(config['bulk_json_path']):
         logging.info("No bulk json file found. Downloading...")
-        config['bulk_json_path'] = fetch_bulk_json()
+        config['bulk_json_path'] = fetch_bulk_json(config['user_agent'], config['accept'])
         write_config(config)
 
     logging.info(f"Loading Scryfall bulk json to dictionary from {config['bulk_json_path']}")
@@ -396,7 +417,7 @@ if __name__ == '__main__':
 
     logging.info(f"Reading decklist from {config['decklist_path']}")
     deck_data = read_decklist(config['decklist_path'], card_dictionary)
-    logging.info(f"Found {len(deck_data)} enties in decklist")
+    logging.info(f"Found {len(deck_data)} entries in decklist")
 
     logging.info("Checking image cache")
     create_image_cache(image_type=config['image_type'], card_data=card_dictionary, decklist=deck_data)
