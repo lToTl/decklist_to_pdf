@@ -176,3 +176,7 @@ requirements.txt
 decklist_to_pdf.ini
 decklist.txt
 Output.pdf
+Deck.odg
+.~lock.Deck.odg#
+Deck.pdf
+cardbacks/Alaundo_cardback.png

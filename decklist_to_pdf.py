@@ -204,7 +204,8 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
     do_B_side_next = False
     if conf['two_sided']: sides = 2
     while working_on < sides:
-            # --- Create PDF ---
+        # --- Create PDF ---
+        if conf['two_sided'] and working_on == 1: output_filename = output_filename[:-4] + "_back.pdf"
         c = canvas.Canvas(output_filename, pagesize=A4)
         while card_index < len(deck):
             # --- Black Background Rectangle ---
@@ -218,11 +219,11 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                     if card_index < len(deck):
                         image_name = deck[card_index]['set_symbol'] + "-" + deck[card_index]['set_number']
 
-                        if (deck[card_index]['two_sided'] and working_on == 0) or (not conf['two_sided'] and deck[card_index]['two_sided'] and not do_B_side_next):
+                        if ((deck[card_index]['two_sided'] and working_on == 0)  or (not conf['two_sided'] and deck[card_index]['two_sided'])) and not do_B_side_next:
                             image_name += "_A"
-                            do_B_side_next = True
+                            if ((conf['two_sided'] or conf['custom_backside']) and deck[card_index]['two_sided']):do_B_side_next = True
                         else: 
-                            if (deck[card_index]['two_sided'] and working_on == 1) or (not conf['two_sided'] and deck[card_index]['two_sided'] and do_B_side_next):
+                            if do_B_side_next:
                                 image_name += "_B"
                                 do_B_side_next = False
                         if conf['custom_backside'] and working_on == 1:
@@ -257,6 +258,7 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                             draw_y = row[i][1] * mm + (card_height * mm - draw_height) / 2
                             
                             c.drawImage(image_path, draw_x, draw_y, width=draw_width, height=draw_height, mask='auto')
+                            print(f"Placed {deck[card_index]['name']},{image_name}")
                         except Exception as e:
                             print(f"Error processing image {image_path}: {e}") # Handle image loading errors
 
@@ -264,10 +266,13 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                         if deck[card_index]['two_sided'] and (not conf['two_sided'] or conf['custom_backside']):
                             if working_on == 0 and not do_B_side_next:
                                 copy_counter += 1
+                        else:
+                            copy_counter += 1
                         # --- count up card_index if needed ---
                         if copy_counter == deck[card_index]["copies"] : 
                             copy_counter = 0
                             card_index += 1
+                            print(f"Card index: {image_path}")
             # Draw_reference_points
             if conf['reference_points']:
                 for iterator_vectors in marker_iteration:
@@ -277,6 +282,8 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
             c.showPage()  # Move to the next page
         c.save()
         print(f"PDF created: {output_filename}")
+        if working_on == 1 or not conf['two_sided']: break
+        working_on += 1
 
 
 def write_config(conf):
