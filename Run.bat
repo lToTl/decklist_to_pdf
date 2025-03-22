@@ -50,13 +50,13 @@ ELSE (
 	echo 1 Dance of the Dead (ICE) 118>>decklist.txt
 	echo 1 Deathgreeter (DDD) 33>>decklist.txt
 	echo 1 Death's-Head Buzzard (VMA) 115>>decklist.txt
-	echo created venv
+	echo created directories and decklist.txt
 	REM Activate the virtual environment
 	call .venv\Scripts\activate.bat
 	echo activated venv
 	echo Installing required packages...
 
-	REM Install packages from requirements.txt
+	REM Install packages
 	pip install reportlab Pillow requests
 
 	echo Setup complete, launching script.

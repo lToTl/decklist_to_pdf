@@ -6,7 +6,7 @@ from urllib.request import urlretrieve, Request
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
-from PIL import Image
+from PIL import Image, ImageEnhance
 import requests
 import logging
 import json
@@ -57,11 +57,14 @@ def read_decklist(filepath, card_data):
             name = decklist_line[decklist_line.index(" ") + 1:decklist_line.index("(") - 1]
             set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
             set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):-1].strip()
+            black_border = True
+            if card_data[f"{set_symbol}-{set_number}"]['border_color'] != "black":
+                black_border = False
             two_sided = False
             layout = card_data[f"{set_symbol}-{set_number}"]['layout']
             if layout == "transform" or layout == "modal_dfc" or layout == "double_faced_token":
                 two_sided = True
-            entry = {'copies': copies, 'name': name, 'set_symbol': set_symbol, 'set_number': set_number, 'two_sided': two_sided}
+            entry = {'copies': copies, 'name': name, 'set_symbol': set_symbol, 'set_number': set_number, 'two_sided': two_sided, 'black_border': black_border}
             decklist.append(entry)
     return decklist
 
@@ -140,6 +143,17 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
     logging.info(f"Downloaded {counter} new images")
 
 
+def correct_gamma(image_path):
+    img = Image.open(image_path)
+    img_width, img_height = img.size
+    border_color = img.getpixel((int(img_width/2), int(img_height - img_height/50)))
+    border_gamma = (border_color[0] + border_color[1] + border_color[2])/3
+    if border_gamma > 5:
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(1+border_gamma*2.5/256)
+        img.save(image_path)
+        img.close()
+        #print(f"Appling contrast of {1+border_gamma*3/256}")
 
 # TODO: Bleed edge mode
 def create_grid_pdf(image_folder, output_filename, deck, conf):
@@ -248,6 +262,9 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                         try:
                             img = Image.open(image_path)
                             img_width, img_height = img.size
+                            img.close()
+                            
+                            if conf['gamma correction']: correct_gamma(image_path)
 
                             # --- Draw Grid of Images ---
 
@@ -321,7 +338,8 @@ image_type:{conf['image_type']}
 # default - for regular black border cards. Image size is 63x88 mm with 2 mm black spacing between cards
 # bleed edge - for full art cards. Image size is 65x90.79 mm with no spacing between cards
 mode:{conf['mode']}
-
+# gamma correction for images
+gamma correction:{conf['gamma correction']}
 # toggle reference point True/False
 reference_points:{conf['reference_points']}
 
@@ -349,8 +367,9 @@ if __name__ == '__main__':
         'pdf_path' : 'output.pdf',
         'image_type' : 'png',
         'mode' : 'default',
+        'gamma correction' : True,
         'reference_points' : True,
-        'x_axis_offset' : 0,
+        'x_axis_offset' : 0.75,
         'user_agent': 'decklist_to_pdf/0.1',
         'accept': 'application/json;q=0.9,*/*;q=0.8'
     }
@@ -386,6 +405,9 @@ if __name__ == '__main__':
                 case 'mode':
                     config['mode'] = parts[1]
                     conf_count += 1
+                case 'gamma correction':
+                    config['gamma correction'] = parts[1] == 'True'
+                    conf_count += 1
                 case 'reference_points':
                     config['reference_points'] = parts[1] == 'True'
                     conf_count += 1
@@ -403,7 +425,7 @@ if __name__ == '__main__':
                     conf_count += 1
                 case 'accept':
                     config['accept'] = parts[1]
-        if conf_count < 12:
+        if conf_count < 13:
             logging.error("Old configu=ration file detected. Regenerating default config.")
             write_config(config)
         
