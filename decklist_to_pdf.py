@@ -425,6 +425,7 @@ if __name__ == '__main__':
                     conf_count += 1
                 case 'accept':
                     config['accept'] = parts[1]
+                    conf_count += 1
         if conf_count < 13:
             logging.error("Old configu=ration file detected. Regenerating default config.")
             write_config(config)
