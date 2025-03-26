@@ -143,7 +143,7 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
     logging.info(f"Downloaded {counter} new images")
 
 
-def correct_gamma(image_path):
+def correct_gamma(image_path, image_format):
     img = Image.open(image_path)
     img_width, img_height = img.size
     border_color = img.getpixel((int(img_width/2), int(img_height - img_height/50)))
@@ -151,7 +151,7 @@ def correct_gamma(image_path):
     if border_gamma > 5:
         enhancer = ImageEnhance.Contrast(img)
         img = enhancer.enhance(1+border_gamma*2.5/256)
-        img.save(image_path)
+        img.save(image_path[:-4] + f"_gc{image_format}")
         img.close()
         #print(f"Appling contrast of {1+border_gamma*3/256}")
 
@@ -264,7 +264,10 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                             img_width, img_height = img.size
                             img.close()
                             
-                            if conf['gamma correction']: correct_gamma(image_path)
+                            if conf['gamma correction']:
+                                if not os.path.exists(image_path[:-4] + f"_gc{image_format}"): 
+                                    correct_gamma(image_path,image_format)
+                                image_path = image_path[:-4] + f"_gc{image_format}"
 
                             # --- Draw Grid of Images ---
 
