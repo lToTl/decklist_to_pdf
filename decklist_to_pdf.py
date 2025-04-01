@@ -9,8 +9,9 @@ from reportlab.lib.units import mm
 from PIL import Image, ImageEnhance
 import requests
 import logging
-import json
+import orjson
 import os
+#import gc
 
 
 def load_card_dictionary(filepath):
@@ -26,25 +27,102 @@ def load_card_dictionary(filepath):
         if the file doesn't exist or if there's a JSON decoding error.
     """
     card_dict = {}
-    try:
-        with open(filepath, 'r', encoding='utf-8') as bulk_json:
-            data = json.load(bulk_json)
-            for card in data:
-                if 'set' not in card or 'collector_number' not in card:
-                    print(f"Warning: Skipping card due to missing 'set' or 'collector_number': {card.get('id', 'Unknown ID')}")
-                    continue
-                key = f"{card['set']}-{card['collector_number']}"
-                card_dict[key] = card
-    except FileNotFoundError:
-        print(f"Error: File not found at {filepath}")
-        return {}
-    except json.JSONDecodeError:
-        print(f"Error: Invalid JSON format in {filepath}")
-        return {}
-    except Exception as e:
-        print(f"Unexpected error occurred {e}")
-        return {}
+    print(f'{filepath.split('/')[0]}/parsed_{filepath.split('/')[-1]}')
+    if os.path.exists(f'{filepath.split('/')[0]}/parsed_{filepath.split('/')[-1]}'):
+        try: 
+            with open(f'{filepath.split('/')[0]}/parsed_{filepath.split('/')[-1]}', 'r', encoding='utf-8') as bulk_json:
+                print("Loading parsed JSON...")
+                # Use ijson to parse the JSON file incrementally
+                # This is more memory efficient for large files
+                return orjson.loads(bulk_json.read())
+        
+        # crash the program if the file is not loaded correctly
+        except orjson.JSONDecodeError as e:
+            print(f"Error: Invalid JSON format in {filepath}")
+            raise e
+        except MemoryError as e:
+            print(f"Out of memory while reading {filepath}. {len(card_dict)} cards into the file. Error: {e}")
+            raise e
+        except FileNotFoundError as e:
+            print(f"Error: File not found at {filepath}")
+            raise e
+                
+    else:
+        try:
+            print(f"Opening: {filepath}")
+            with open(filepath, 'r', encoding='utf-8') as bulk_json:
+                print("Parsing JSON...")
+                # Use ijson to parse the JSON file incrementally
+                # This is more memory efficient for large files
 
+                data = orjson.loads(bulk_json.read())
+                # Read the next chunk of data
+                for card in data:
+                    #print(f"Processing card: {card['name']}")
+                    # Create a key using set and collector_number
+                    key = f"{card['set'].lower()}-{card['collector_number']}"
+                    # Add needed card data to the dictionary
+                    if card['layout'] in {'transform', 'modal_dfc', 'double_faced_token','reversible_card'}:
+                            card_dict[key] = {'name': card['name'], 
+                                            'set': card['set'],
+                                            'collector_number': card['collector_number'],
+                                            'image_uris': [card['card_faces'][0]['image_uris'],card['card_faces'][1]['image_uris']],
+                                            'layout': card['layout'],
+                                            'border_color': card['border_color']}
+                    
+                    else:
+                        if card['layout'] in {
+                        'normal',
+                        'token',
+                        'split',
+                        'layout',
+                        'flip',
+                        'mutate',
+                        'adventure',
+                        'emblem',
+                        'scheme',
+                        'vanguard',
+                        'planar',
+                        'phenomenon',
+                        'saga',
+                        'augment',
+                        'leveler',
+                        'prototype',
+                        'host',
+                        'case',
+                        'class',
+                        'meld'
+                        }:
+                            
+                            card_dict[key] = {'name': card['name'], 
+                                            'set': card['set'],
+                                            'collector_number': card['collector_number'],
+                                            'image_uris': card['image_uris'],
+                                            'layout': card['layout'],
+                                            'border_color': card['border_color']}
+                        
+                        else: 
+                            if not card['layout'] == 'art_series': print (f"Unknown layout {card['layout']} for card {card['name']}")
+                # Save parsed data to a file for future use
+                with open(f'{filepath.split('/')[0]}/parsed_{filepath.split('/')[-1]}', 'w', encoding="utf-8") as outfile:
+                    outfile.write(orjson.dumps(card_dict).decode())
+                print(f"Parsed {len(card_dict)} cards from {filepath}")    
+                    
+                # collect garbage to free up memory
+                # gc.collect()
+            
+                        
+        # crash the program if the file is not loaded correctly
+        except orjson.JSONDecodeError as e:
+            print(f"Error: Invalid JSON format in {filepath}")
+            raise e
+        except MemoryError as e:
+            print(f"Out of memory while reading {filepath}. {len(card_dict)} cards into the file. Error: {e}")
+            raise e
+        except FileNotFoundError as e:
+            print(f"Error: File not found at {filepath}")
+            raise e
+    
     logging.info(f"Loaded {len(card_dict)} cards from {filepath}")
     return card_dict
 

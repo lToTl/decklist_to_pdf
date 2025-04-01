@@ -60,7 +60,7 @@ if not exist decklist.txt (
 REM Activate the virtual environment and run the script
 call .venv\Scripts\activate.bat
 echo Installing required packages...
-pip install reportlab Pillow requests
+pip install reportlab Pillow requests orjson
 echo Setup complete, launching script.
 python decklist_to_pdf.py
 call .venv\Scripts\deactivate.bat
