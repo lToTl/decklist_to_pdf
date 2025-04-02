@@ -231,8 +231,9 @@ def correct_gamma(image_path, image_format):
         img = enhancer.enhance(1+border_gamma*2.5/256)
         img.save(image_path[:-4] + f"_gc{image_format}")
         img.close()
+        return True
         #print(f"Appling contrast of {1+border_gamma*3/256}")
-
+    return False
 # TODO: Bleed edge mode
 def create_grid_pdf(image_folder, output_filename, deck, conf):
     """
@@ -327,8 +328,8 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                                 do_B_side_next = False
                         if conf['custom_backside'] and working_on == 1:
                             image_name = conf['backside']
-                            image_path = os.path.join('cardbacks', conf['cardback'])
-                        else:image_path = os.path.join(image_folder, image_name + image_format)
+                            image_path = f"cardbacks/{conf['cardback']}"
+                        else:image_path = f"{image_folder}{image_name + image_format}"
 
                         # Draw Rectangle (optional, for debugging/border)
                         #c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height  + grid_x_offset + 2*spacing) * mm , stroke=0 ,  fill=1)
@@ -344,8 +345,8 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                             
                             if conf['gamma correction']:
                                 if not os.path.exists(image_path[:-4] + f"_gc{image_format}"): 
-                                    correct_gamma(image_path,image_format)
-                                image_path = image_path[:-4] + f"_gc{image_format}"
+                                    if correct_gamma(image_path,image_format):
+                                        image_path = image_path[:-4] + f"_gc{image_format}"
 
                             # --- Draw Grid of Images ---
 
@@ -365,7 +366,9 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                             c.drawImage(image_path, draw_x, draw_y, width=draw_width, height=draw_height, mask='auto')
                             print(f"Placed {deck[card_index]['name']},{image_name}")
                         except Exception as e:
+
                             print(f"Error processing image {image_path}: {e}") # Handle image loading errors
+                            raise e
 
                         # --- count up copy_counter if needed ---
                         if deck[card_index]['two_sided'] and (not conf['two_sided'] or conf['custom_backside']):
@@ -528,4 +531,4 @@ if __name__ == '__main__':
 
     logging.info("Creating PDF")
 
-    create_grid_pdf(f"image_cache/{config['image_type']}", "Output.pdf", deck_data, config)
+    create_grid_pdf(f"image_cache/{config['image_type']}/", "Output.pdf", deck_data, config)
