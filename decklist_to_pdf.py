@@ -231,7 +231,7 @@ def correct_gamma(image_path, image_format):
     if border_gamma < 3:
         img.close()
         return False
-    while border_gamma >= 3:
+    while border_gamma > 3:
         enhancer = ImageEnhance.Contrast(img)
         img = enhancer.enhance(1+border_gamma*1/256)
         border_color = img.getpixel((int(img_width/2), int(img_height - img_height/50)))
@@ -316,12 +316,12 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
         if conf['two_sided'] and working_on == 1: output_filename = output_filename[:-4] + "_back.pdf"
         c = canvas.Canvas(output_filename, pagesize=A4)
         card_index = 0
+        copy_counter = 0
         while card_index < len(deck):
             # --- Black Background Rectangle ---
             c.setFillColorRGB(0, 0, 0)  # Black
             c.setLineWidth(0)
             #c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height + 2*spacing) * mm , stroke=0 , fill=1)
-            copy_counter = 0
             for row in card_positions:
                 for i  in range(3):
 
@@ -337,7 +337,7 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                                 do_B_side_next = False
                         if conf['custom_backside'] and working_on == 1:
                             image_name = conf['backside']
-                            image_path = f"cardbacks/{conf['cardback']}"
+                            image_path = f"cardbacks/{conf['backside']}"
                         else:image_path = f"{image_folder}{image_name + image_format}"
                         
                         # Draw Rectangle (optional, for debugging/border)
@@ -354,11 +354,11 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                                 img_width, img_height = img.size
                                 img.close()
                                 
-                                if conf['gamma_correction']:
-                                    if not os.path.exists(image_path[:-4] + f"_gc{image_format}"): 
-                                        if correct_gamma(image_path,image_format):
-                                            print(f"Gamma correction applied to {image_path}")
-                                            image_path = image_path[:-4] + f"_gc{image_format}"
+                                if conf['gamma_correction'] and working_on == 0:
+                                     
+                                    if correct_gamma(image_path,image_format):
+                                        print(f"Gamma correction applied to {image_path}")
+                                        image_path = image_path[:-4] + f"_gc{image_format}"
                                 # --- debug pause ---
                                 # --- Draw Grid of Images ---
 
