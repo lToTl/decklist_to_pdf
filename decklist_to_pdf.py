@@ -1,4 +1,4 @@
-import urllib
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from logging import Logger
 from time import sleep
@@ -134,6 +134,20 @@ def read_decklist(filepath, card_data):
         for decklist_line in decklist_file:
             copies = int(decklist_line[:decklist_line.index(" ")])
             name = decklist_line[decklist_line.index(" ") + 1:decklist_line.index("(") - 1]
+            if name.startswith("*"):
+                # Custom card, skip card_data lookup
+                name = name[1:]
+                if "|" in decklist_line:
+                    # Custom card with custom backside
+                    name, backside = decklist_line[decklist_line.index("|") + 1:].strip().split(".")
+                    name = name.strip()
+                    if backside.endswith(".jpg") or backside.endswith(".png"):
+                        entry = {'copies': copies, 'name': name, 'custom': True, 'backside': backside, 'two_sided': True}
+                        decklist.append(entry)
+                        continue
+                entry = {'copies': copies, 'name': name, 'custom': True, 'two_sided': False}
+                decklist.append(entry)
+                continue
             set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
             set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):].strip()
             black_border = True
@@ -143,7 +157,7 @@ def read_decklist(filepath, card_data):
             layout = card_data[f"{set_symbol}-{set_number}"]['layout']
             if layout == "transform" or layout == "modal_dfc" or layout == "double_faced_token":
                 two_sided = True
-            entry = {'copies': copies, 'name': name, 'set_symbol': set_symbol, 'set_number': set_number, 'two_sided': two_sided, 'black_border': black_border}
+            entry = {'copies': copies, 'name': name, 'set_symbol': set_symbol, 'set_number': set_number, 'two_sided': two_sided, 'black_border': black_border, 'custom': False}
             decklist.append(entry)
     return decklist
 
@@ -187,12 +201,14 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
             set_symbol = decklist_line['set_symbol']
             set_number = decklist_line['set_number']
             layout = card_data[f"{set_symbol}-{set_number}"]['layout']
-            
+                # Check if the image already exists in the cache as a one-sided or two-sided card and if the name starts with the marker "*" denoting a custom card
             if not (os.path.exists(f"image_cache/{image_type}/{set_symbol}-{set_number}.{image_format}") or
-                (os.path.exists(f"image_cache/{image_type}/{set_symbol}-{set_number}_A.{image_format}"))):
+                (os.path.exists(f"image_cache/{image_type}/{set_symbol}-{set_number}_A.{image_format}")) or
+                decklist_line['custom']):
+                onesided_layoyut = ['normal', 'token', 'split', 'layout', 'flip', 'mutate', 'adventure', 'emblem', 'scheme', 'vanguard', 'planar', 'phenomenon', 'saga', 'augment', 'leveler', 'prototype','host','case','class','meld']
+                twosided_layoyut = ['transform', 'modal_dfc', 'double_faced_token','reversible_card']
 
-
-                if layout == "normal" or layout == "token" or layout == "split" or layout == "flip":
+                if layout in onesided_layoyut:
                     logging.info(f"Downloading {name} -> {set_symbol}-{set_number}.{image_format}")
                     image_uri = card_data[f"{set_symbol}-{set_number}"]['image_uris'][image_type]
                     destination = f"image_cache/{image_type}/{set_symbol}-{set_number}.{image_format}"
@@ -201,21 +217,24 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
                     sleep(0.1)
                     continue
 
-                if layout == "transform" or layout == "modal_dfc" or layout == "double_faced_token":
-                    logging.info(logging.info(f"Downloading {name} -> {set_symbol}-{set_number}_A.{image_format}"))
+                if layout in twosided_layoyut:
+                    
                     
                     image_uri = card_data[f"{set_symbol}-{set_number}"]['image_uris'][0][image_type]
                     destination = f"image_cache/{image_type}/{set_symbol}-{set_number}_A.{image_format}"
-                    executor.submit(fetch_image, image_uri, destination, config['user_agent'], config['accept'])
-                    counter += 1
-                    sleep(0.1)
+                    if not os.path.exists(destination):
+                        logging.info(logging.info(f"Downloading {name} -> {set_symbol}-{set_number}_A.{image_format}"))
+                        executor.submit(fetch_image, image_uri, destination, config['user_agent'], config['accept'])
+                        counter += 1
+                        sleep(0.1)
 
-                    logging.info(logging.info(f"Downloading {name} -> {set_symbol}-{set_number}_B.{image_format}"))
                     image_uri = card_data[f"{set_symbol}-{set_number}"]['image_uris'][1][image_type]
                     destination = f"image_cache/{image_type}/{set_symbol}-{set_number}_B.{image_format}"
-                    executor.submit(fetch_image, image_uri, destination, config['user_agent'], config['accept'])
-                    counter += 1
-                    sleep(0.1)
+                    if not os.path.exists(destination):
+                        logging.info(logging.info(f"Downloading {name} -> {set_symbol}-{set_number}_B.{image_format}"))
+                        executor.submit(fetch_image, image_uri, destination, config['user_agent'], config['accept'])
+                        counter += 1
+                        sleep(0.1)
                     continue
                 raise Exception(f"Unknown card layout {layout}")
                 
@@ -227,30 +246,37 @@ def correct_gamma(image_path, image_format):
     img = Image.open(image_path)
     img_width, img_height = img.size
     border_color = img.getpixel((int(img_width/2), int(img_height - img_height/50)))
-    border_gamma = (border_color[0] + border_color[1] + border_color[2])/3
+    if border_color is None:
+        img.close()
+        return False
+    # Handle grayscale and color images
+    if isinstance(border_color, (tuple, list)):
+        border_gamma = sum(border_color[:3]) / 3
+    elif isinstance(border_color, (int, float)):
+        border_gamma = border_color
+    else:
+        img.close()
+        return False
     if border_gamma < 3:
         img.close()
         return False
     while border_gamma > 3:
         enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(1+border_gamma*1/256)
+        img = enhancer.enhance(1 + border_gamma * 1 / 256)
         border_color = img.getpixel((int(img_width/2), int(img_height - img_height/50)))
-        border_gamma = (border_color[0] + border_color[1] + border_color[2])/3
+        if isinstance(border_color, (tuple, list)):
+            border_gamma = sum(border_color[:3]) / 3
+        elif isinstance(border_color, (int, float)):
+            border_gamma = border_color
+        else:
+            break
     img.save(image_path[:-4] + f"_gc{image_format}")
     img.close()
     return True
         #print(f"Appling contrast of {1+border_gamma*3/256}")
 # TODO: Bleed edge mode
 def create_grid_pdf(image_folder, output_filename, deck, conf):
-    """
-    Generates a PDF with A4 pages, each containing a 3x3 grid of rectangles.
-    Each rectangle displays an image from the specified folder.
-
-    Args:
-        :param image_folder: The path to the folder containing the images.
-        :param output_filename: The name of the PDF file to be created.
-        :param conf: configuration dictionary.
-    """
+    
     image_format = '.png'
     if conf['image_type'] != 'png':
         image_format = '.jpg'
@@ -317,7 +343,8 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
         c = canvas.Canvas(output_filename, pagesize=A4)
         card_index = 0
         copy_counter = 0
-        while card_index < len(deck):
+        deck_size = len(deck)
+        while card_index < deck_size:
             # --- Black Background Rectangle ---
             c.setFillColorRGB(0, 0, 0)  # Black
             c.setLineWidth(0)
@@ -326,20 +353,41 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                 for i  in range(3):
 
                     if card_index < len(deck):
-                        image_name = deck[card_index]['set_symbol'] + "-" + deck[card_index]['set_number']
-
-                        if (deck[card_index]['two_sided'] and (conf['custom_backside'] or not conf['two_sided'] or working_on == 0)) and not do_B_side_next:
-                            image_name += "_A"
-                            if ((not conf['two_sided'] or conf['custom_backside']) and deck[card_index]['two_sided']):do_B_side_next = True
-                        else: 
-                            if (do_B_side_next or working_on) and deck[card_index]['two_sided']:
+                        # --- Handle Custom cards ---
+                        image_path = ""
+                        if working_on == 0:
+                            if deck[card_index]['custom']:
+                                image_name = deck[card_index]['name'].replace(" ", "_").replace("(", "").replace(")", "").replace("|", "_")
+                                image_path = f"custom_cards/{image_name}{image_format}"
+                            else:
+                                image_name = deck[card_index]['set_symbol'] + "-" + deck[card_index]['set_number']
+                                image_path = f"{image_folder}{image_name + image_format}"
+                            # --- Handle Two Sided Cards with or without double sided printing ---
+                            if (deck[card_index]['two_sided'] and (conf['custom_backside'] or not conf['two_sided'] or working_on == 0)) and not (do_B_side_next or working_on == 1 or deck[card_index]['custom']):
+                                image_name += "_A"
+                                image_path = image_path[:-4] + "_A" + image_format
+                                if (not conf['two_sided'] or conf['custom_backside']):do_B_side_next = True
+                            elif do_B_side_next:
                                 image_name += "_B"
+                                image_path = image_path[:-4] + "_B" + image_format
                                 do_B_side_next = False
-                        if conf['custom_backside'] and working_on == 1:
-                            image_name = conf['backside']
-                            image_path = f"cardbacks/{conf['backside']}"
-                        else:image_path = f"{image_folder}{image_name + image_format}"
+                        if working_on == 1:
+                            if conf['custom_backside']:
+                                if deck[card_index]['two_sided'] and not do_B_side_next: do_B_side_next = True
+                                else: do_B_side_next = False
+                                image_name = conf['backside']
+                                image_path = f"cardbacks/{conf['backside']}"
+                            elif deck[card_index]['two_sided'] and conf['two_sided']:
+                                if deck[card_index]['custom']:
+                                    image_name = deck[card_index]['backside']
+                                    image_path = f"custom_cards/{deck[card_index]['backside']}{image_format}"
+                                else:
+                                    image_name = deck[card_index]['set_symbol'] + "-" + deck[card_index]['set_number'] + "_B"
+                                    image_path = f"{image_folder}{image_name + image_format}"
+                                image_path = f"{image_folder}{image_name + image_format}"
+                             
                         
+
                         # Draw Rectangle (optional, for debugging/border)
                         #c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height  + grid_x_offset + 2*spacing) * mm , stroke=0 ,  fill=1)
 
@@ -354,10 +402,10 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                                 img_width, img_height = img.size
                                 img.close()
                                 
-                                if conf['gamma_correction'] and working_on == 0:
+                                if conf['gamma_correction']:
                                      
                                     if correct_gamma(image_path,image_format):
-                                        print(f"Gamma correction applied to {image_path}")
+                                        #print(f"Gamma correction applied to {image_path}")
                                         image_path = image_path[:-4] + f"_gc{image_format}"
                                 # --- debug pause ---
                                 # --- Draw Grid of Images ---
@@ -377,7 +425,7 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
 
                                 c.rect(draw_x - spacing * mm , draw_y - spacing * mm , draw_width + 2*spacing * mm , draw_height + 2*spacing * mm , stroke=0 , fill=1)
                                 c.drawImage(image_path, draw_x, draw_y, width=draw_width, height=draw_height, mask='auto')
-                                print(f"Placed {deck[card_index]['name']},{image_name}")
+                                #print(f"Placed {deck[card_index]['name']},{image_name}")
                             except Exception as e:
 
                                 print(f"Error processing image {image_path}: {e}") # Handle image loading errors
@@ -385,21 +433,21 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
 
                         # --- count up copy_counter if needed ---
                         if deck[card_index]['two_sided'] and (not conf['two_sided'] or conf['custom_backside']):
-                            if working_on == 0 and not do_B_side_next:
+                            if not do_B_side_next:
                                 copy_counter += 1
                         else:
                             copy_counter += 1
                         # --- count up card_index if needed ---
                         if copy_counter == deck[card_index]["copies"] : 
                             copy_counter = 0
+                            print(f"Placed: {card_index}/{deck_size}")
                             card_index += 1
-                            print(f"Card index: {image_path}")
             # Draw_reference_points
             if conf['reference_points']:
                 for iterator_vectors in marker_iteration:
                     for vector in marker_vectors:
                         c.rect(grid_center_x + iterator_vectors[0] * grid_width * mm/2 , grid_center_y + iterator_vectors[1] * (grid_height + 10)*mm/2 , vector[0] , vector[1] , stroke=0 , fill=1)
-
+                
             c.showPage()  # Move to the next page
         c.save()
         print(f"PDF created: {output_filename}")

@@ -26,6 +26,7 @@ echo Checking and creating necessary folders...
 REM Check and create main directories
 if not exist scryfall_bulk_json mkdir scryfall_bulk_json && echo Created: scryfall_bulk_json
 if not exist cardbacks mkdir cardbacks && echo Created: cardbacks
+if not exist custom_cards mkdir custom_cards && echo Created: custom_cards
 if not exist image_cache mkdir image_cache && echo Created: image_cache
 
 REM Check and create subdirectories in image_cache
