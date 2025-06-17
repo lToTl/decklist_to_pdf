@@ -132,14 +132,15 @@ def read_decklist(filepath, card_data):
     decklist = []
     with open(filepath, 'r', encoding='utf-8') as decklist_file:
         for decklist_line in decklist_file:
+            if decklist_line.startswith("#") or decklist_line.strip() == "":
+                continue
             copies = int(decklist_line[:decklist_line.index(" ")])
-            name = decklist_line[decklist_line.index(" ") + 1:decklist_line.index("(") - 1]
-            if name.startswith("*"):
+            if decklist_line[decklist_line.index(" ")+1:].startswith("*"):
                 # Custom card, skip card_data lookup
-                name = name[1:]
+                name = decklist_line[decklist_line.index("*")+1:].strip()
                 if "|" in decklist_line:
                     # Custom card with custom backside
-                    name, backside = decklist_line[decklist_line.index("|") + 1:].strip().split(".")
+                    name, backside = name.strip().split("||")
                     name = name.strip()
                     if backside.endswith(".jpg") or backside.endswith(".png"):
                         entry = {'copies': copies, 'name': name, 'custom': True, 'backside': backside, 'two_sided': True}
@@ -148,6 +149,7 @@ def read_decklist(filepath, card_data):
                 entry = {'copies': copies, 'name': name, 'custom': True, 'two_sided': False}
                 decklist.append(entry)
                 continue
+            name = decklist_line[decklist_line.index(" ") + 1:decklist_line.index("(") - 1]
             set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
             set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):].strip()
             black_border = True
@@ -197,6 +199,9 @@ def create_image_cache(image_type: str, card_data: dict, decklist: list) -> None
     counter = 0
     with ThreadPoolExecutor(max_workers=12) as executor:
         for decklist_line in decklist:
+            if decklist_line['custom']:
+                # Skip custom cards, they are handled separately
+                continue
             name = decklist_line['name']
             set_symbol = decklist_line['set_symbol']
             set_number = decklist_line['set_number']
@@ -257,9 +262,7 @@ def correct_gamma(image_path, image_format):
     else:
         img.close()
         return False
-    if border_gamma < 3:
-        img.close()
-        return False
+    
     while border_gamma > 3:
         enhancer = ImageEnhance.Contrast(img)
         img = enhancer.enhance(1 + border_gamma * 1 / 256)
@@ -269,6 +272,8 @@ def correct_gamma(image_path, image_format):
         elif isinstance(border_color, (int, float)):
             border_gamma = border_color
         else:
+            break
+        if border_gamma < 3:
             break
     img.save(image_path[:-4] + f"_gc{image_format}")
     img.close()
@@ -283,7 +288,8 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
     # --- Constants (in mm) ---
     card_width = 63
     card_height = 88
-    spacing = 2
+    spacing = conf['spacing']
+    bg_box_margin = 2
     grid_width = 3 * card_width + 2 * spacing
     grid_height = 3 * card_height + 2 * spacing
 
@@ -320,8 +326,8 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
     for row in range(3):
         card_positions.append([])
         for pos in range(3):
-            x = grid_x_offset + pos * (card_width + spacing)
-            y = page_height_mm - (grid_y_offset + (row + 1) * (card_height + spacing) - spacing)
+            x = grid_x_offset + pos * (card_width + spacing*pos)
+            y = page_height_mm - (grid_y_offset + (row + 1) * (card_height + spacing*row))
             card_positions[row].append([x, y])
     
     
@@ -348,7 +354,7 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
             # --- Black Background Rectangle ---
             c.setFillColorRGB(0, 0, 0)  # Black
             c.setLineWidth(0)
-            #c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height + 2*spacing) * mm , stroke=0 , fill=1)
+            c.rect((grid_x_offset - bg_box_margin) * mm , (grid_y_offset - bg_box_margin) * mm , (grid_width + 2*bg_box_margin) * mm , (grid_height + 2*bg_box_margin) * mm , stroke=0 , fill=1)
             for row in card_positions:
                 for i  in range(3):
 
@@ -403,27 +409,29 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
                                 img.close()
                                 
                                 if conf['gamma_correction']:
-                                     
-                                    if correct_gamma(image_path,image_format):
-                                        #print(f"Gamma correction applied to {image_path}")
+                                    if os.path.exists(image_path[:-4] + f"_gc{image_format}"):
                                         image_path = image_path[:-4] + f"_gc{image_format}"
+                                    elif not conf['custom_backside'] and conf['gamma_correction'] :
+                                        if correct_gamma(image_path, image_format):
+                                            image_path = image_path[:-4] + f"_gc{image_format}"
+                                            #print(f"Gamma correction applied to {image_path}")
                                 # --- debug pause ---
                                 # --- Draw Grid of Images ---
 
                                 # Calculate scaling factor (fit image within rectangle)
                                 scale_x = (card_width * mm) / img_width
                                 scale_y = (card_height * mm) / img_height
-                                scale = min(scale_x, scale_y)
+                                #scale = min(scale_x, scale_y)
 
                                 # Calculate centered image position
-                                draw_width = img_width * scale
-                                draw_height = img_height * scale
+                                draw_width = img_width * scale_x
+                                draw_height = img_height * scale_y
                                 xindex = i
                                 if conf['two_sided'] and working_on == 1: xindex = 2 - i
                                 draw_x = row[xindex][0] * mm + (card_width * mm - draw_width) / 2
                                 draw_y = row[i][1] * mm + (card_height * mm - draw_height) / 2
 
-                                c.rect(draw_x - spacing * mm , draw_y - spacing * mm , draw_width + 2*spacing * mm , draw_height + 2*spacing * mm , stroke=0 , fill=1)
+                                #c.rect(draw_x - spacing * mm , draw_y - spacing * mm , draw_width + 2*spacing * mm , draw_height + 2*spacing * mm , stroke=0 , fill=1)
                                 c.drawImage(image_path, draw_x, draw_y, width=draw_width, height=draw_height, mask='auto')
                                 #print(f"Placed {deck[card_index]['name']},{image_name}")
                             except Exception as e:
@@ -446,7 +454,7 @@ def create_grid_pdf(image_folder, output_filename, deck, conf):
             if conf['reference_points']:
                 for iterator_vectors in marker_iteration:
                     for vector in marker_vectors:
-                        c.rect(grid_center_x + iterator_vectors[0] * grid_width * mm/2 , grid_center_y + iterator_vectors[1] * (grid_height + 10)*mm/2 , vector[0] , vector[1] , stroke=0 , fill=1)
+                        c.rect(grid_center_x + iterator_vectors[0] * 193 * mm/2 , grid_center_y + iterator_vectors[1] * 278*mm/2 , vector[0] , vector[1] , stroke=0 , fill=1)
                 
             c.showPage()  # Move to the next page
         c.save()
@@ -480,6 +488,9 @@ pdf_path:{conf['pdf_path']}
 # possible image types are small / normal / large / png / art_crop / border_crop
 image_type:{conf['image_type']}
 
+# spacing between cards in mm
+spacing:{conf['spacing']}
+
 # default - for regular black border cards. Image size is 63x88 mm with 2 mm black spacing between cards
 # bleed edge - for full art cards. Image size is 65x90.79 mm with no spacing between cards
 mode:{conf['mode']}
@@ -511,6 +522,7 @@ if __name__ == '__main__':
         'backside': 'back.png',
         'pdf_path' : 'output.pdf',
         'image_type' : 'png',
+        'spacing' : 0,
         'mode' : 'default',
         'gamma_correction' : True,
         'reference_points' : True,
@@ -592,4 +604,4 @@ if __name__ == '__main__':
 
     logging.info("Creating PDF")
 
-    create_grid_pdf(f"image_cache/{config['image_type']}/", "Output.pdf", deck_data, config)
+    create_grid_pdf(f"image_cache/{config['image_type']}/", "output/Output.pdf", deck_data, config)
