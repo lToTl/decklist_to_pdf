@@ -1,13 +1,13 @@
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from logging import Logger
-from time import sleep
+from time import sleep, time
 from urllib.request import urlretrieve, Request
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from PIL import Image, ImageEnhance
+import time
 import requests
 import logging
 import orjson
@@ -75,12 +75,9 @@ def load_card_dictionary(filepath) -> dict:
                                         'other_face': f"{key}_{'B' if side == 'A' else 'A'}",
                                         'border_color': card['border_color']}
                             side = 'B'
-                        if key == 'lci-128':
-                            a=1
-                        continue
-
+                        
                     else:
-                        if card['layout'] in {
+                        if card['layout'] not in {
                         'normal',
                         'token',
                         'split',
@@ -102,17 +99,16 @@ def load_card_dictionary(filepath) -> dict:
                         'class',
                         'meld'
                         }:
-                            
-                            card_dict[key] = {'name': card['name'], 
-                                            'set': card['set'],
-                                            'collector_number': card['collector_number'],
-                                            'image_uris': card['image_uris'],
-                                            'layout': card['layout'],
-                                            'two_sided': False,
-                                            'border_color': card['border_color']}
-                        
-                        else: 
                             if not card['layout'] == 'art_series': print (f"Unknown layout {card['layout']} for card {card['name']}")
+                        card_dict[key] = {'name': card['name'], 
+                                        'set': card['set'],
+                                        'collector_number': card['collector_number'],
+                                        'image_uris': card['image_uris'],
+                                        'layout': card['layout'],
+                                        'two_sided': False,
+                                        'border_color': card['border_color']}
+                    
+                            
                 # Save parsed data to a file for future use
                 with open(f'{filepath.split('/')[0]}/parsed_{filepath.split('/')[-1]}', 'w', encoding="utf-8") as outfile:
                     outfile.write(orjson.dumps(card_dict).decode())
@@ -183,6 +179,7 @@ def read_decklist(filepath):
     except Exception as e:
         logging.error(f"Error reading decklist file {filepath} on line {line_count}: {e}")
         raise e
+
 def card_data_lookup(decklist_line:str) -> dict:
     data = {}    
     set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
@@ -198,6 +195,7 @@ def card_data_lookup(decklist_line:str) -> dict:
         decklist_line = decklist_line[1:].strip()
         key = f"{key}_A"
     try:
+
         data = card_data[key]
     except KeyError as e:
         raise KeyError(f"Card {decklist_line} not found in card data. Please check the decklist format or the card data.") from e
@@ -613,8 +611,11 @@ accept:{conf['accept']}
 
 
 if __name__ == '__main__':
+    # Set up logging
     logging.basicConfig(level=logging.INFO)
-
+    # Time runtime
+    start_time = time.perf_counter()
+    logging.info("Starting decklist_to_pdf script")
     # Default configuration values
     
     conf = {
@@ -707,3 +708,6 @@ if __name__ == '__main__':
     logging.info("Creating PDF")
     image_cashe = {}
     create_grid_pdf(f"image_cache/{conf['image_type']}/", "output/Output.pdf")
+    end = time.perf_counter()
+    logging.info(f"Finished in {end - start_time:.2f} seconds")
+    
