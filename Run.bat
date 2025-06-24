@@ -24,10 +24,11 @@ if not exist .venv\ (
 echo Checking and creating necessary folders...
 
 REM Check and create main directories
-if not exist scryfall_bulk_json mkdir scryfall_bulk_json && echo Created: scryfall_bulk_json
-if not exist cardbacks mkdir cardbacks && echo Created: cardbacks
-if not exist custom_cards mkdir custom_cards && echo Created: custom_cards
-if not exist image_cache mkdir image_cache && echo Created: image_cache
+if not exist scryfall_bulk_json mkdir scryfall_bulk_json && echo Created: scryfall_bulk_json folder
+if not exist cardbacks mkdir cardbacks && echo Created: cardbacks folder
+if not exist custom_cards mkdir custom_cards && echo Created: custom_cards folder
+if not exist image_cache mkdir image_cache && echo Created: image_cache folder
+if not exist output mkdir output && echo Creatrd: output folder
 
 REM Check and create subdirectories in image_cache
 if not exist image_cache\small mkdir image_cache\small && echo Created: image_cache\small

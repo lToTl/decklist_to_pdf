@@ -6,6 +6,7 @@ from urllib.request import urlretrieve, Request
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from PIL import Image, ImageEnhance
 import requests
 import logging
@@ -236,37 +237,40 @@ def fetch_bulk_json(user_agent, accept):
     return local_filename
 
 
-def fetch_image(image_url:str, destination:str, user_agent:str, accept:str, key:str, custom:bool) -> None:
-    img_data = None
-    if custom:
-        try:
-            image_cashe.update({key: Image.open(destination)})
-            return
-        except FileNotFoundError as e:
-            logging.error(f"Custom image {destination} not found. Please check the path or the custom card name.")
+def fetch_image(image_url:str, destination:str, headers, key:str, custom:bool) -> None:
+    img = None
     
     if image_url is None:
         logging.error(f"Image URL for {key} is None. Skipping download.")
         return
     if not os.path.exists(destination):
-        headers = {'User-Agent': user_agent,
-                'Accept': accept}
         logging.info(f"Downloading image {destination}")
-        img_data = requests.get(image_url, headers=headers).content
+        img = requests.get(image_url, headers=headers).content
         with open(destination, 'wb') as image_file:
-            image_file.write(img_data)
+            image_file.write(img)
+    if img is None: img = Image.open(destination)
+    else: img = Image.open(io.BytesIO(img))
     if conf['gamma_correction']:
         if not os.path.exists(destination[:-4] + f"_gc{destination[-4:]}" ):
-            
-            if img_data is None:
-                img_data = Image.open(destination)
-            img_data = correct_gamma(img_data, os.path.splitext(destination)[1])
-            img_data.save(f"{destination[:-4]}_gc{os.path.splitext(destination)[1]}")
+            img = correct_gamma(img, os.path.splitext(destination)[1])
+            img.save(f"{destination[:-4]}_gc{os.path.splitext(destination)[1]}")
             logging.info(f"Gamma correction applied to {destination}")
-            image_cashe.update({key: img_data})
-            return
-        image_cashe.update({key: Image.open(f"{destination[:-4]}_gc{os.path.splitext(destination)[1]}")})
-        return
+    
+    card_width = 63
+    card_height = 88
+    # Calculate scaling factor (fit image within rectangle)
+    scale_x = (card_width * mm) / img.width
+    scale_y = (card_height * mm) / img.height
+    #scale = min(scale_x, scale_y)
+
+    # Calculate centered image position
+    width = img.width * scale_x
+    height = img.height * scale_y
+    img_data:dict = {
+                'data': ImageReader(img),
+                'width': width,
+                'height': height,
+            }
     image_cashe.update({key: img_data})
     return
 
@@ -318,7 +322,8 @@ def create_image_cache()    -> None:
 
     os.makedirs("image_cache/" + image_type, exist_ok=True)
     counter = 0
-    
+    headers = {'User-Agent': conf['user_agent'], 
+            'Accept': conf['accept']}
     with ThreadPoolExecutor(max_workers=12) as executor:
         
         for decklist_line in deck_data:
@@ -331,7 +336,7 @@ def create_image_cache()    -> None:
             if decklist_line['sides'] is not None:
                 for side in decklist_line['sides']:
                     if side['custom']:
-                        executor.submit(fetch_image, f"custom_cards/{side['name']}.png", f"custom_cards/{side['name']}.{image_format}", conf['user_agent'], conf['accept'],side['key'],True)
+                        executor.submit(fetch_image, f"custom_cards/{side['name']}.png", f"custom_cards/{side['name']}.{image_format}", headers,side['key'],True)
                         continue
                     layout = side['layout']
                     # Check if the image already exists in the cache as a one-sided or two-sided card and if the name starts with the marker "*" denoting a custom card
@@ -342,7 +347,7 @@ def create_image_cache()    -> None:
                         image_uri = card_data[f"{side['key']}"]['image_uris'][image_type]
                         destination = f"image_cache/{image_type}/{side['key']}.{image_format}"
                         key = side['key']
-                        executor.submit(fetch_image, image_uri, destination, conf['user_agent'], conf['accept'],key,side['custom'])
+                        executor.submit(fetch_image, image_uri, destination, headers ,key,side['custom'])
                         if not os.path.exists(destination):
                             counter += 1
                             sleep(0.1)
@@ -353,7 +358,7 @@ def create_image_cache()    -> None:
                         for side in decklist_line['sides']:
                             image_uri = side['image_uris'][image_type]
                             destination = f"image_cache/{image_type}/{side['key']}.{image_format}"
-                            executor.submit(fetch_image, image_uri, destination, conf['user_agent'], conf['accept'],side['key'],side['custom'])
+                            executor.submit(fetch_image, image_uri, destination, headers ,side['key'],side['custom'])
                             if not os.path.exists(destination):
                                 counter += 1
                                 sleep(0.1)
@@ -364,7 +369,7 @@ def create_image_cache()    -> None:
             key = decklist_line['key']
             name = decklist_line['name']
             if decklist_line['custom']:
-                executor.submit(fetch_image, f"custom_cards/{decklist_line['name']}.png", f"custom_cards/{decklist_line['name']}.{image_format}", conf['user_agent'], conf['accept'],decklist_line['name'],True)
+                executor.submit(fetch_image, f"custom_cards/{decklist_line['name']}.png", f"custom_cards/{decklist_line['name']}.{image_format}", headers ,decklist_line['name'],True)
                 counter += 1
                 continue
             
@@ -376,7 +381,7 @@ def create_image_cache()    -> None:
                 
                 image_uri = card_data[f"{key}"]['image_uris'][image_type]
                 destination = f"image_cache/{image_type}/{key}.{image_format}"
-                executor.submit(fetch_image, image_uri, destination, conf['user_agent'], conf['accept'],key,decklist_line['custom'])
+                executor.submit(fetch_image, image_uri, destination, headers ,key,decklist_line['custom'])
                 if not os.path.exists(destination):
                     counter += 1
                     sleep(0.1)
@@ -387,8 +392,8 @@ def create_image_cache()    -> None:
         if conf['custom_backside'] and conf['two_sided']:
             if os.path.exists(f"cardbacks/{conf['backside']}"):
                 logging.info(f"Loading backside {conf['backside']}")
-                executor.submit(fetch_image, f"cardbacks/{conf['backside']}", f"cardbacks/{conf['backside']}", conf['user_agent'], conf['accept'],conf['backside'],True)
-                
+                executor.submit(fetch_image, f"cardbacks/{conf['backside']}", f"cardbacks/{conf['backside']}", headers, conf['backside'],True)
+
         # --- Wait for all threads to finish ---
         executor.shutdown(wait=True)
     logging.info(f"Downloaded {counter} new images")
@@ -493,7 +498,6 @@ def create_grid_pdf(image_folder, output_filename):
                             elif do_B_side_next:
                                 key += "_B"
                                 do_B_side_next = False
-                        image_path = f"{image_folder}{key + image_format}"
                         if working_on == 1:
                             if conf['custom_backside'] and (not conf['two_sided'] or not deck_data[card_index]['two_sided']):
                                 if card['two_sided'] and not do_B_side_next: do_B_side_next = True
@@ -518,34 +522,19 @@ def create_grid_pdf(image_folder, output_filename):
                             try:
                                 
                                 img = image_cashe[key]
-                                img_width, img_height = img.size
-                                img.close()
                                 
-                                if conf['gamma_correction']:
-                                    if os.path.exists(image_path[:-4] + f"_gc{image_format}"):
-                                        image_path = image_path[:-4] + f"_gc{image_format}"
-                                    elif not conf['custom_backside'] and conf['gamma_correction'] :
-                                        if correct_gamma(image_path, image_format):
-                                            image_path = image_path[:-4] + f"_gc{image_format}"
-                                            #print(f"Gamma correction applied to {image_path}")
-                                # --- debug pause ---
+                                
+                                
                                 # --- Draw Grid of Images ---
 
-                                # Calculate scaling factor (fit image within rectangle)
-                                scale_x = (card_width * mm) / img_width
-                                scale_y = (card_height * mm) / img_height
-                                #scale = min(scale_x, scale_y)
-
-                                # Calculate centered image position
-                                draw_width = img_width * scale_x
-                                draw_height = img_height * scale_y
+                                
                                 xindex = i
                                 if conf['two_sided'] and working_on == 1: xindex = 2 - i
-                                draw_x = row[xindex][0] * mm + (card_width * mm - draw_width) / 2
-                                draw_y = row[i][1] * mm + (card_height * mm - draw_height) / 2
+                                draw_x = row[xindex][0] * mm + (card_width * mm - img['width']) / 2
+                                draw_y = row[i][1] * mm + (card_height * mm - img['height']) / 2
 
                                 #c.rect(draw_x - spacing * mm , draw_y - spacing * mm , draw_width + 2*spacing * mm , draw_height + 2*spacing * mm , stroke=0 , fill=1)
-                                c.drawImage(image_path, draw_x, draw_y, width=draw_width, height=draw_height, mask='auto')
+                                c.drawImage(img['data'], draw_x, draw_y, img['width'], img['height'], mask='auto')
                                 #print(f"Placed {deck[card_index]['name']},{image_name}")
                             except Exception as e:
 
