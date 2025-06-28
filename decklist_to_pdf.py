@@ -4,8 +4,9 @@ from time import sleep, time
 from urllib.request import urlretrieve, Request
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-from reportlab.lib.units import mm
+from reportlab.lib.units import mm,inch
 from reportlab.lib.utils import ImageReader
+from PyPDF2 import PdfWriter, PdfReader
 from PIL import Image, ImageEnhance
 import time
 import requests
@@ -13,21 +14,12 @@ import logging
 import orjson
 import os
 import io
+import re
 #import gc
 
 
 def load_card_dictionary(filepath) -> dict:
-    """
-    Reads a JSON file containing card data and creates a dictionary.
-
-    Args:
-        filepath: The path to the JSON file.
-
-    Returns:
-        A dictionary where the keys are "set-collector_number" and the values
-        are the corresponding card objects.  Returns an empty dictionary
-        if the file doesn't exist or if there's a JSON decoding error.
-    """
+    
     card_dict = {}
     print(f'{filepath.split('/')[0]}/parsed_{filepath.split('/')[-1]}')
     if os.path.exists(f'{filepath.split('/')[0]}/parsed_{filepath.split('/')[-1]}'):
@@ -57,7 +49,7 @@ def load_card_dictionary(filepath) -> dict:
                 print("Parsing JSON...")
                 # Use ijson to parse the JSON file incrementally
                 # This is more memory efficient for large files
-
+                bulk_json.buffer
                 data = orjson.loads(bulk_json.read())
                 # Read the next chunk of data
                 for card in data:
@@ -76,8 +68,7 @@ def load_card_dictionary(filepath) -> dict:
                                         'border_color': card['border_color']}
                             side = 'B'
                         
-                    else:
-                        if card['layout'] not in {
+                    elif card['layout'] in {
                         'normal',
                         'token',
                         'split',
@@ -99,14 +90,16 @@ def load_card_dictionary(filepath) -> dict:
                         'class',
                         'meld'
                         }:
-                            if not card['layout'] == 'art_series': print (f"Unknown layout {card['layout']} for card {card['name']}")
-                        card_dict[key] = {'name': card['name'], 
-                                        'set': card['set'],
-                                        'collector_number': card['collector_number'],
-                                        'image_uris': card['image_uris'],
-                                        'layout': card['layout'],
-                                        'two_sided': False,
-                                        'border_color': card['border_color']}
+                            card_dict[key] = {'name': card['name'], 
+                                    'set': card['set'],
+                                    'collector_number': card['collector_number'],
+                                    'image_uris': card['image_uris'],
+                                    'layout': card['layout'],
+                                    'two_sided': False,
+                                    'border_color': card['border_color']}
+                    
+                    elif not card['layout'] == 'art_series': print (f"Unknown layout {card['layout']} for card {card['name']}")
+                    
                     
                             
                 # Save parsed data to a file for future use
@@ -132,9 +125,25 @@ def load_card_dictionary(filepath) -> dict:
     logging.info(f"Loaded {len(card_dict)} cards from {filepath}")
     return card_dict
 
-# TODO: double sided format
+def add_card_data_to_decklist(card_data: dict) -> None:
+    """
+    Add card data to the decklist dictionary.
+    :param card_data: Dictionary containing card data
+    :return: None
+    """
+    i = 0
+    copies = card_data['copies']
+    card_data.pop('copies', None)  # Remove copies from card_data
+    while i < copies:
+        if 'sides' in card_data and card_data['sides'] is not None and not conf['two_sided'] and not card_data['custom']:
+            for side in card_data['sides']:
+                decklist.append(side)
+        else:
+            decklist.append(card_data)
+        i += 1
+
 def read_decklist(filepath):
-    decklist = []
+    global decklist
     line_count = 0
     try:
         with open(filepath, 'r', encoding='utf-8') as decklist_file:
@@ -160,19 +169,19 @@ def read_decklist(filepath):
                             # Normal card, lookup in card_data
                             
                             cards.append(card_data_lookup(card))
-                    decklist.append({'copies': copies, 'sides': cards, 'two_sided': True, 'custom': True})
+                    add_card_data_to_decklist({'copies': copies, 'sides': cards, 'two_sided': True, 'custom': True})
                     continue
                 if decklist_line.strip().startswith("*"):
                     # Custom card, skip card_data lookup
                     name = decklist_line[decklist_line.index("*")+1:].strip()
                     entry = {'name': name, 'key' : name, 'two_sided': False, 'black_border': False, 'custom': True, 'copies': copies}
-                    decklist.append(entry)
+                    add_card_data_to_decklist(entry)
                     continue
                 # Normal card, lookup in card_data
                 entry = card_data_lookup(decklist_line)
                 entry.update({'copies': copies})
-                decklist.append(entry)
-        return decklist
+                add_card_data_to_decklist(entry)
+        return
     except FileNotFoundError:
         logging.error(f"Decklist file {filepath} not found.")
         raise FileNotFoundError(f"Decklist file {filepath} not found.")
@@ -220,59 +229,92 @@ def card_data_lookup(decklist_line:str) -> dict:
             'border_crop': None
         }
     }
-def fetch_bulk_json(user_agent, accept):
-    headers = {'User-Agent': user_agent,
-               'Accept': accept}
+
+def fetch_bulk_json():
+    headers = {'User-Agent': conf['user_agent'],
+               'Accept': conf['accept']}
     response = requests.get('https://api.scryfall.com/bulk-data/default-cards', headers=headers)
     response.raise_for_status()
     json_response = response.json()
     bulk_json_uri = json_response['download_uri']
     local_filename = f"scryfall_bulk_json/{bulk_json_uri.split('/')[-1]}"
 
-    request = Request(bulk_json_uri, headers={'User-Agent': user_agent, 'Accept': accept})
-    with urllib.request.urlopen(request) as response, open(local_filename, 'wb') as out_file:
-        out_file.write(response.read())
+    request = Request(bulk_json_uri, headers=headers)
+    if not os.path.exists(local_filename):
+        logging.info('Downloading new scryfall ')
+        with urllib.request.urlopen(request) as response, open(local_filename, 'wb') as out_file:
+            out_file.write(response.read())
     return local_filename
 
+def rezise_image(image, target_size=[63, 88], dpi=600) -> Image.Image:
+    """
+    Resize an image to the target size in mm at the specified DPI.
+    :param image: PIL Image object
+    :param target_size: tuple of (width, height) in mm
+    :param dpi: dots per inch for the image
+    :return: resized PIL Image object converted to "RGB"
+    """
+    target_width_px = int(target_size[0] * dpi / inch)  # Convert mm to pixels
+    target_height_px = int(target_size[1] * dpi / inch)
+    return image.resize((target_width_px, target_height_px), Image.Resampling.LANCZOS)
 
 def fetch_image(image_url:str, destination:str, headers, key:str, custom:bool) -> None:
     img = None
-    
+
     if image_url is None:
         logging.error(f"Image URL for {key} is None. Skipping download.")
         return
     if not os.path.exists(destination):
         logging.info(f"Downloading image {destination}")
-        img = requests.get(image_url, headers=headers).content
-        with open(destination, 'wb') as image_file:
-            image_file.write(img)
-    if img is None: img = Image.open(destination)
-    else: img = Image.open(io.BytesIO(img))
+        img_bytes = requests.get(image_url, headers=headers).content
+        img = Image.open(io.BytesIO(img_bytes))
+        img.load()
+        img = rezise_image(img, target_size=[63, 88], dpi=600)
+        img.save(destination,const['image_format'])
+
+    else:
+        img = Image.open(destination)
+        img.load()
+
+
     if conf['gamma_correction']:
-        if not os.path.exists(destination[:-4] + f"_gc{destination[-4:]}" ):
-            img = correct_gamma(img, os.path.splitext(destination)[1])
-            img.save(f"{destination[:-4]}_gc{os.path.splitext(destination)[1]}")
+        gc_path = destination[:-4] + f"_gc{os.path.splitext(destination)[1]}"
+        if not os.path.exists(gc_path):
+            img = correct_gamma(img)
+            img.save(gc_path)
             logging.info(f"Gamma correction applied to {destination}")
+        else:
+            img = Image.open(gc_path)
+            img.load()
+
     
-    card_width = 63
-    card_height = 88
     # Calculate scaling factor (fit image within rectangle)
-    scale_x = (card_width * mm) / img.width
-    scale_y = (card_height * mm) / img.height
+    scale_x = (const['card_width'] * mm) / img.width
+    scale_y = (const['card_height'] * mm) / img.height
     #scale = min(scale_x, scale_y)
 
     # Calculate centered image position
-    width = img.width * scale_x
-    height = img.height * scale_y
+    draw_width = img.width * scale_x
+    draw_height = img.height * scale_y
+    data = ImageReader(img)
+    #pages.drawImage(data, -10000, -10000, img.width, img.height)
+    #dummy_canvas = canvas.Canvas(io.BytesIO(), pagesize=A4)
+    #dummy_canvas.drawImage(data, -10000, -10000, img.width, img.height)
+    #dummy_canvas.saveState()
+
+
+    # Create image data dictionary
     img_data:dict = {
-                'data': ImageReader(img),
-                'width': width,
-                'height': height,
-            }
-    image_cashe.update({key: img_data})
+        'data': data,
+        'width': draw_width,
+        'height': draw_height,
+    }
+    # Add image data to cache
+    image_cashe[key] = img_data
+   
     return
 
-def correct_gamma(img_in, image_format) -> Image.Image:
+def correct_gamma(img_in) -> Image.Image:
     #convert bytestream to image
     img = Image.Image()
     if isinstance(img_in, Image.Image):
@@ -309,22 +351,16 @@ def correct_gamma(img_in, image_format) -> Image.Image:
 
 def create_image_cache()    -> None:
     image_type = conf['image_type']
-    match image_type:
-        case 'small'|'normal'|'large'|'art_crop'|'border_crop':
-            image_format = 'jpg'
-        case 'png':
-            image_format = 'png'
-        case _:
-            logging.error(f"Unknown image type {image_type}")
-            raise Exception(f"Unknown image type {image_type}")
+    image_format = const['image_format']
 
     os.makedirs("image_cache/" + image_type, exist_ok=True)
     counter = 0
     headers = {'User-Agent': conf['user_agent'], 
             'Accept': conf['accept']}
+    image_cashe_timer_start = time.perf_counter()
     with ThreadPoolExecutor(max_workers=12) as executor:
         
-        for decklist_line in deck_data:
+        for decklist_line in decklist:
             
             if 'sides' in decklist_line and decklist_line['sides'] is not None:
                 if decklist_line['sides'][0]['force_side'] == 2:
@@ -367,7 +403,7 @@ def create_image_cache()    -> None:
             key = decklist_line['key']
             name = decklist_line['name']
             if decklist_line['custom']:
-                executor.submit(fetch_image, f"custom_cards/{decklist_line['name']}.png", f"custom_cards/{decklist_line['name']}.{image_format}", headers ,decklist_line['name'],True)
+                executor.submit(fetch_image, f"custom_cards/{name}.png", f"custom_cards/{name}.{image_format}", headers ,name,True)
                 counter += 1
                 continue
             
@@ -391,21 +427,152 @@ def create_image_cache()    -> None:
             if os.path.exists(f"cardbacks/{conf['backside']}"):
                 logging.info(f"Loading backside {conf['backside']}")
                 executor.submit(fetch_image, f"cardbacks/{conf['backside']}", f"cardbacks/{conf['backside']}", headers, conf['backside'],True)
-
+        
         # --- Wait for all threads to finish ---
         executor.shutdown(wait=True)
+    ImageCacheTimerEnd = time.perf_counter()
     logging.info(f"Downloaded {counter} new images")
 
+    # Warm up the image cashe reader to avoid issues with ReportLa
+    """warmup_timer_start = time.perf_counter()
+    logging.info("Warming up image cache...")
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        for key in image_cashe.keys():
+            executor.submit(warm_up_image, key)
+        executor.shutdown(wait=True)
+    warmup_timer_end = time.perf_counter()"""
+    logging.info(f"Image cache created in {ImageCacheTimerEnd - image_cashe_timer_start:.2f} seconds.")
 
-
+def warm_up_image(key:str) -> None:
+    """
+    Warm up the image cache by drawing the image on a dummy canvas.
+    This is needed to avoid issues with ReportLab when drawing images.
+    """
+    global image_cashe
+    img = image_cashe[key]['data']
+    dummy_canvas = canvas.Canvas(io.BytesIO(), pagesize=A4)
+    dummy_canvas.drawImage(img, -10000, -10000, image_cashe[key]['width'], image_cashe[key]['height'])
+    dummy_canvas.save()
+    image_cashe[key]['data'] = img  # Update the image data to be a ImageReader object
+    return
 # TODO: Bleed edge mode
-def create_grid_pdf(image_folder, output_filename):
-    image_format = '.png'
-    if conf['image_type'] != 'png':
-        image_format = '.jpg'
+def render_page(page_index:int, side:int) -> None:
+    """
+    Render a page with 9 cards.
+    :param page_index: Index of the page to render
+    :param side: Side of the cards to render (0 for front, 1 for back)
+    :return: None
+    """
+    global pages, deck_data, image_cashe, conf
+    card_index = page_index * 9
+    deck_size = const['deck_size']
+    if card_index >= deck_size: return
+    page = canvas.Canvas(io.BytesIO(), pagesize=A4)
+    page.setFillColorRGB(0, 0, 0)  # Black
+    page.setLineWidth(0)
+    
+    do_B_side_next = False
+    
+    #print(f"Two sided: {conf['two_sided']}, Custom Backside {conf['custom_backside']}")
+    
+    #print(f"Working on side {working_on+1} of {sides}")
+    # --- Create pages ---
+    #if conf['two_sided'] and working_on == 1: output_filename = output_filename[:-4] + "_back.pdf"
+    
+    
+    #while card_index < stop_at and card_index < deck_size:
+    # --- Black Background Rectangle ---
+    #page.rect((const['grid_x_offset'] - conf['bg_box_margin']) * mm , (const['grid_y_offset'] - conf['bg_box_margin']) * mm , (const['grid_width'] + 2*conf['bg_box_margin']) * mm , (const['grid_height'] + 2*conf['bg_box_margin']) * mm , stroke=0 , fill=1)
+    
+    for row in const['card_positions']:
+        for i  in range(3):
+
+            if card_index < deck_size:
+                image_placement_time_start = time.perf_counter()
+                card = decklist[card_index]
+                # --- Handle Custom cards ---
+                if 'sides' in card and card['sides'] is not None:
+                    key = f"{card['sides'][side]['key']}"
+                else:
+                    key = card['key']
+                
+                if side == 1:
+                    if conf['custom_backside'] and (not conf['two_sided'] or not card['two_sided']):
+                        if card['two_sided'] and not do_B_side_next: do_B_side_next = True
+                        else: do_B_side_next = False
+                        key = conf['backside']
+                    elif card['two_sided'] and conf['two_sided']:
+                        if card['custom']:
+                            key = card['sides'][1]['key']
+                # Draw Rectangle (optional, for debugging/border)
+                #c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height  + grid_x_offset + 2*spacing) * mm , stroke=0 ,  fill=1)
+
+                #c.setFillColorRGB(1, 1, 1) # White
+                #c.rect(x * mm, y * mm, rectangle_width * mm, rectangle_height * mm, stroke=1, fill=0)
+                
+                # --- Image Placement ---
+                #if side == 0 or conf['custom_backside'] or decklist[card_index]['two_sided']:
+                try:
+                    
+                    img = image_cashe[key]
+                    
+                    
+                    
+                    # --- Draw Grid of Images ---
+
+                    
+                    xindex = i
+                    if conf['two_sided'] and side == 1: xindex = 2 - i
+                    draw_x = row[xindex][0] * mm + (const['card_width'] * mm - img['width']) / 2
+                    draw_y = row[i][1] * mm + (const['card_height'] * mm - img['height']) / 2
+                    # --- Black Background Rectangle per card ---
+                    page.rect(draw_x - const['spacing'] * mm , draw_y - const['spacing'] * mm , img['width'] + 2*const['spacing'] * mm , img['height'] + 2*const['spacing'] * mm , stroke=0 , fill=1)
+                    page.drawImage(img['data'], draw_x, draw_y, img['width'], img['height'], mask='auto')
+                    #print(f"Placed {deck[card_index]['name']},{image_name}")
+                except Exception as e:
+
+                    print(f"Error processing image {key}: {e}") # Handle image loading errors
+                    raise e
+
+                card_index += 1
+                i += 1
+                
+                image_placement_time_end = time.perf_counter()
+                image_placement_time = image_placement_time_end - image_placement_time_start
+                #logging.info(f"Placed {key} in {(image_placement_time*100):0f} milliseconds")
+                image_placement_times.append(image_placement_time)
+        
+        # Draw_reference_points
+        if conf['reference_points']:
+            for iterator_vectors in const['marker_iteration']:
+                for vector in const['marker_vectors']:
+                    page.rect(const['grid_center_x'] + iterator_vectors[0] * 193 * mm/2 , const['grid_center_y'] + iterator_vectors[1] * 278*mm/2 , vector[0] , vector[1] , stroke=0 , fill=1)
+            
+    
+    #print(f"PDF created: {output_filename}")
+    #if working_on == 1 or not conf['two_sided']: break
+    #page.save()
+    pages.update({f"{page_index},{side}":canvas_to_pdf_page(page)})
+
+def render_pages():
     # --- Fill image cache with images ---
     logging.info("Loading Images into cache...")
     create_image_cache()
+    with ThreadPoolExecutor(max_workers=32) as executor:
+        i=0
+        while  i < const['deck_size']//9+1:
+            logging.info(f'rendering page {i} front')
+            executor.submit(render_page,i, 0)
+            i += 1
+        if conf['two_sided']:
+            i = 0
+            logging.info(f'rendering page {i} back')
+            while  i < const['deck_size']//9+1:
+                executor.submit(render_page,i, 1)
+                i += 1
+        executor.shutdown(wait=True)
+
+def generate_constants() -> dict:
     # --- Constants (in mm) ---
     card_width = 63
     card_height = 88
@@ -430,196 +597,241 @@ def create_grid_pdf(image_folder, output_filename):
     marker_vectors = [[2*mm,2*mm],[-2*mm,-2*mm]]
     marker_iteration = [[1,1],[1,-1],[-1,-1],[-1,1]]
 
-    # --- Get Image Files ---
-    #image_files = sorted([f for f in os.listdir(image_folder) if os.path.isfile(os.path.join(image_folder, f)) and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])  # Add more extensions if needed
-
-    #if not image_files:
-    #    print("No images found in the specified folder.")
-    #    return
-    
-
     # --- Calculate Grid Center ---
     grid_center_x = (page_width)/2 + x_axis_offset*mm
     grid_center_y = (page_height/2)
 
     # --- Calculate Card Positions ---
     card_positions = []
+
+    
     for row in range(3):
         card_positions.append([])
         for pos in range(3):
             x = grid_x_offset + pos * (card_width + spacing*pos)
             y = page_height_mm - (grid_y_offset + (row + 1) * (card_height + spacing*row))
             card_positions[row].append([x, y])
+
+    # --- Determine image file extension ---
+    image_type = conf['image_type']
+    match image_type:
+        case 'small'|'normal'|'large'|'art_crop'|'border_crop':
+            image_format = 'jpg'
+        case 'png':
+            image_format = 'png'
+        case _:
+            logging.error(f"Unknown image type {image_type}")
+            raise Exception(f"Unknown image type {image_type}")
+
+    return {
+        'deck_size': len(decklist),
+        'total_pages': (len(decklist) + 8) // 9,  # 9 cards per page
+        'card_width': card_width,
+        'card_height': card_height,
+        'spacing': spacing,
+        'bg_box_margin': bg_box_margin,
+        'grid_width': grid_width,
+        'grid_height': grid_height,
+        'page_width_mm': page_width_mm,
+        'page_height_mm': page_height_mm,
+        'grid_x_offset': grid_x_offset,
+        'grid_y_offset': grid_y_offset,
+        'grid_center_x': grid_center_x,
+        'grid_center_y': grid_center_y,
+        'marker_vectors': marker_vectors,
+        'marker_iteration': marker_iteration,
+        'card_positions': card_positions,
+        'image_format': image_format
+    }
+
+def canvas_to_pdf_page(canvas_obj):
+    """
+    Convert a reportlab canvas to a PyPDF2 PageObject.
+    """
+    # Save the canvas to a BytesIO buffer
+    buffer = canvas_obj.getpdfdata() if hasattr(canvas_obj, "getpdfdata") else None
+    if buffer is None:
+        # fallback for older reportlab: save to BytesIO
+        pdf_buffer = io.BytesIO()
+        canvas_obj.save()
+        pdf_buffer.write(pdf_buffer.getvalue())
+        pdf_buffer.seek(0)
+    else:
+        pdf_buffer = io.BytesIO(buffer)
+    # Read the PDF page using PyPDF2
+    pdf_reader = PdfReader(pdf_buffer)
+    page = pdf_reader.pages[0]
+    return page
+
+def merge_pages() -> None:
+    """
+    Merge all pages into a single PDF file.
+    :return: None
+    """
+    global pages, conf
+    output_filename = conf['pdf_path']
+    if not output_filename.endswith('.pdf'):
+        output_filename += '.pdf'
     
+    logging.info(f"Merging {len(pages)} pages into {output_filename}")
     
+    pdf_writer = PdfWriter()
+    side = ''
+            
+    if conf['stagger']:
+        page_counter = 0
+        stagger_pattern = [[0,0],[1,0],[0,1],[1,1]]
+        while page_counter < const['total_pages']:
+            for pattern in stagger_pattern:
+                key = f"{page_counter + pattern[0]},{pattern[1]}"
+                if key in pages:
+                    
+                    match pattern[1]:
+                        case 0:
+                            side = 'front'
+                        case 1:
+                            side = 'back'
+                    logging.info(f"mergin page {page_counter + pattern[0]} {side}")
+                    pdf_writer.add_page(pages[key])
+            page_counter += 2
+    else:
+        for page in range(const['total_pages']):
+            page = pages[f"{page},0"]
+            pdf_writer.add_page(page)
+    # Write the merged PDF to the output file
+    with open(output_filename, 'wb') as output_pdf:
+        pdf_writer.write(output_pdf)
 
-    
-    card_index = 0
-    #deck_size = 0 
-    #for card in deck: deck_size += card['copies']
-    key = ""
-    working_on = 0
-    sides = 1
-    do_B_side_next = False
-    if conf['two_sided']: sides = 2
-    print(f"Two sided: {conf['two_sided']}, Custom Backside {conf['custom_backside']}")
-    while working_on < sides:
-        print(f"Working on side {working_on+1} of {sides}")
-        # --- Create PDF ---
-        if conf['two_sided'] and working_on == 1: output_filename = output_filename[:-4] + "_back.pdf"
-        c = canvas.Canvas(output_filename, pagesize=A4)
-        card_index = 0
-        copy_counter = 0
-        deck_size = len(deck_data)
-        while card_index < deck_size:
-            # --- Black Background Rectangle ---
-            c.setFillColorRGB(0, 0, 0)  # Black
-            c.setLineWidth(0)
-            c.rect((grid_x_offset - bg_box_margin) * mm , (grid_y_offset - bg_box_margin) * mm , (grid_width + 2*bg_box_margin) * mm , (grid_height + 2*bg_box_margin) * mm , stroke=0 , fill=1)
-            for row in card_positions:
-                for i  in range(3):
-
-                    if card_index < len(deck_data):
-                        card = deck_data[card_index]
-                        # --- Handle Custom cards ---
-                        image_path = ""
-                        if 'sides' in card and card['sides'] is not None:
-                            key = f"{card['sides'][working_on]['key']}"
-                        else:
-                            key = card['key']
-                        
-                        if working_on == 0:
-                            # --- Handle Two Sided Cards with or without double sided printing ---
-                            if (card['two_sided'] and (conf['custom_backside'] or not conf['two_sided'] or working_on == 0)) and not (do_B_side_next or working_on == 1 or deck_data[card_index]['custom']):
-                                key += "_A"
-                                if (not conf['two_sided'] or conf['custom_backside']):do_B_side_next = True
-                            elif do_B_side_next:
-                                key += "_B"
-                                do_B_side_next = False
-                        if working_on == 1:
-                            if conf['custom_backside'] and (not conf['two_sided'] or not deck_data[card_index]['two_sided']):
-                                if card['two_sided'] and not do_B_side_next: do_B_side_next = True
-                                else: do_B_side_next = False
-                                key = conf['backside']
-                            elif card['two_sided'] and conf['two_sided']:
-                                if card['custom']:
-                                    key = card['sides'][1]['key']
-                                
-                                
-                             
-                        
-
-                        # Draw Rectangle (optional, for debugging/border)
-                        #c.rect((grid_x_offset - spacing) * mm , (grid_y_offset - spacing) * mm , (grid_width + 2*spacing) * mm , (grid_height  + grid_x_offset + 2*spacing) * mm , stroke=0 ,  fill=1)
-
-                        #c.setFillColorRGB(1, 1, 1) # White
-                        #c.rect(x * mm, y * mm, rectangle_width * mm, rectangle_height * mm, stroke=1, fill=0)
-                        
-                        # --- Image Placement ---
-                        if working_on == 0 or conf['custom_backside'] or deck_data[card_index]['two_sided']:
-                            try:
-                                
-                                img = image_cashe[key]
-                                
-                                
-                                
-                                # --- Draw Grid of Images ---
-
-                                
-                                xindex = i
-                                if conf['two_sided'] and working_on == 1: xindex = 2 - i
-                                draw_x = row[xindex][0] * mm + (card_width * mm - img['width']) / 2
-                                draw_y = row[i][1] * mm + (card_height * mm - img['height']) / 2
-
-                                #c.rect(draw_x - spacing * mm , draw_y - spacing * mm , draw_width + 2*spacing * mm , draw_height + 2*spacing * mm , stroke=0 , fill=1)
-                                c.drawImage(img['data'], draw_x, draw_y, img['width'], img['height'], mask='auto')
-                                #print(f"Placed {deck[card_index]['name']},{image_name}")
-                            except Exception as e:
-
-                                print(f"Error processing image {image_path}: {e}") # Handle image loading errors
-                                raise e
-
-                        # --- count up copy_counter if needed ---
-                        if deck_data[card_index]['two_sided'] and (not conf['two_sided'] or conf['custom_backside']):
-                            if not do_B_side_next:
-                                copy_counter += 1
-                        else:
-                            copy_counter += 1
-                        # --- count up card_index if needed ---
-                        if copy_counter == deck_data[card_index]["copies"] : 
-                            copy_counter = 0
-                            print(f"Placed: {card_index}/{deck_size}")
-                            card_index += 1
-            # Draw_reference_points
-            if conf['reference_points']:
-                for iterator_vectors in marker_iteration:
-                    for vector in marker_vectors:
-                        c.rect(grid_center_x + iterator_vectors[0] * 193 * mm/2 , grid_center_y + iterator_vectors[1] * 278*mm/2 , vector[0] , vector[1] , stroke=0 , fill=1)
-                
-            c.showPage()  # Move to the next page
-        c.save()
-        print(f"PDF created: {output_filename}")
-        #if working_on == 1 or not conf['two_sided']: break
-        working_on += 1
-
-
-def write_config():
-    logging.info("Creating config file...")
-    with open('decklist_to_pdf.ini', 'w') as config_file:
-        config_file.write(f"""# relative path to scryfall default-cards bulk json, leave empty to fetch fresh one from scryfall (~465MB)
-bulk_json_path:{conf['bulk_json_path']}
-
+def write_config(conf_list:list):
+    with open('decklist_to_pdf.ini', 'a') as config_file:
+        for config in conf_list:
+            match config:
+                case 'decklist_path':
+                    config_file.write(f"""
 # relative path to decklist listing unique cards one per line in of the formats:
 # copies name (SET) collector_number
 # copies name (SET) collector_number | backside.jpg/*.png
 # copies name (SET) collector_number | (SET) collector_number
 decklist_path:{conf['decklist_path']}
-
+""")
+                case 'two_sided':
+                    config_file.write(f"""
 # two sided printing
 two_sided:{conf['two_sided']}
+""")
+                case 'custom_backside':
+                    config_file.write(f"""
 # has custom backside
-custom_backside:{conf['custom_backside']} 
+custom_backside:{conf['custom_backside']}
+""")
+                case 'backside':
+                    config_file.write(f"""
 # default backside image
 backside:{conf['backside']}
-
+""")
+                case 'pdf_path':
+                    config_file.write(f"""
 # relative export path for pdf
 pdf_path:{conf['pdf_path']}
-
+""")
+                case 'image_type':
+                    config_file.write(f"""
 # possible image types are small / normal / large / png / art_crop / border_crop
 image_type:{conf['image_type']}
-
+""")
+                case 'spacing':
+                    config_file.write(f"""
 # spacing between cards in mm
 spacing:{conf['spacing']}
-
+""")
+                case 'mode':
+                    config_file.write(f"""
 # default - for regular black border cards. Image size is 63x88 mm with 2 mm black spacing between cards
 # bleed edge - for full art cards. Image size is 65x90.79 mm with no spacing between cards
 mode:{conf['mode']}
+""")
+                case 'gamma_correction':
+                    config_file.write(f"""
 # gamma correction for images
 gamma_correction:{conf['gamma_correction']}
+""")
+                case 'reference_points':
+                    config_file.write(f"""
 # toggle reference point True/False
 reference_points:{conf['reference_points']}
-
+""")
+                case 'stagger':
+                    config_file.write(f"""
+# stagger pages for faster 2 sided printing with slow printers (Front,Front,Back,Back)
+stagger: {conf['stagger']}
+""")
+                case 'x_axis_offset':
+                    config_file.write(f"""
 # move everything on the x_axis
 x_axis_offset:{conf['x_axis_offset']}
-
+""")
+                case 'user_agent':
+                    config_file.write(f"""
 # user agent for scryfall bulk json download
 user_agent:{conf['user_agent']}
-
+""")
+                case 'accept':
+                    config_file.write(f"""
 # accept header for scryfall bulk json download
 accept:{conf['accept']}
 """)
+    config_file.close()
 
+def read_config():
+    keys = list(conf.keys())
+    conf_count = 0
+    conf_update_check = conf.copy()
+    conf_update_check.pop('bulk_json_path')
+    for a in conf_update_check.keys():
+        conf_update_check[a] = False
+    with open("decklist_to_pdf.ini", "r") as file:
+        conf_count = 0
+        for line in file:
+            if not line.strip() or line.lstrip().startswith('#'):
+                continue
+            parts = line.strip().split(':')
+            for key in keys:
+                match parts[0]:
+                    case key:
+                        conf_count += 1
+                        conf[key] = parts[1]
+                        if conf[key] == 'True':
+                            conf[key] = True
+                            break
+                        if conf[key] == 'False':
+                            conf[key] = False
+                            break
+                        # --- check if the value is a number and convert it if true ---
+                        try:
+                            conf[key] = int(conf[key])
+                        except ValueError:
+                            try:
+                                conf[key] = float(conf[key])
+                            except ValueError:
+                                conf[key]
+                        conf_update_check[key] = True
+                        
+                        break
+    if conf_count < len(conf_update_check):
+        for config in conf_update_check:
+            if not conf_update_check[config]: write_config([config])
+                
+        
+    
 
 if __name__ == '__main__':
     # Set up logging
     logging.basicConfig(level=logging.INFO)
     # Time runtime
-    start_time = time.perf_counter()
+    full_start_time = time.perf_counter()
     logging.info("Starting decklist_to_pdf script")
     # Default configuration values
-    
     conf = {
-        'bulk_json_path' : '',
         'decklist_path' : 'decklist.txt',
         'two_sided': False,
         'custom_backside': False,
@@ -630,84 +842,57 @@ if __name__ == '__main__':
         'mode' : 'default',
         'gamma_correction' : True,
         'reference_points' : True,
+        'stagger': True,
         'x_axis_offset' : 0.75,
         'user_agent': 'decklist_to_pdf/0.1',
         'accept': 'application/json;q=0.9,*/*;q=0.8'
     }
+    conf.update({'bulk_json_path':fetch_bulk_json()})
 
+    
+    
 
     if not os.path.exists('decklist_to_pdf.ini'):
-        write_config()
+        write_config(list(conf.keys()))
+    else:
+        logging.info("Loading configuration from decklist_to_pdf.ini")
+        read_config()
 
-    logging.info("Loading configuration from decklist_to_pdf.ini")
     
-    with open("decklist_to_pdf.ini", "r") as f:
-        conf_count = 0
-        for line in f:
-            if line[0] == '#':
-                continue
-            parts = line.strip().split(':')
-            match parts[0]: 
-                case 'bulk_json_path':
-                    conf['bulk_json_path'] = parts[1]
-                    conf_count += 1
-                case 'decklist_path':
-                    conf['decklist_path'] = parts[1]
-                    conf_count += 1
-                case 'backside':
-                    conf['backside'] = parts[1]
-                    conf_count += 1
-                case 'pdf_path':
-                    conf['pdf_path'] = parts[1]
-                    conf_count += 1
-                case 'image_type':
-                    conf['image_type'] = parts[1]
-                    conf_count += 1
-                case 'mode':
-                    conf['mode'] = parts[1]
-                    conf_count += 1
-                case 'gamma_correction':
-                    conf['gamma correction'] = parts[1] == 'True'
-                    conf_count += 1
-                case 'reference_points':
-                    conf['reference_points'] = parts[1] == 'True'
-                    conf_count += 1
-                case 'x_axis_offset':
-                    conf['x_axis_offset'] = parts[1]
-                    conf_count += 1
-                case 'two_sided':
-                    conf['two_sided'] = parts[1] == 'True'
-                    conf_count += 1
-                case 'custom_backside':
-                    conf['custom_backside'] = parts[1] == 'True'
-                    conf_count += 1
-                case 'user_agent':
-                    conf['user_agent'] = parts[1]
-                    conf_count += 1
-                case 'accept':
-                    conf['accept'] = parts[1]
-                    conf_count += 1
-        if conf_count < 13:
-            logging.error("Old configu=ration file detected. Regenerating default config.")
-            write_config()
-        
-    if not os.path.exists(conf['bulk_json_path']):
-        logging.info("No bulk json file found. Downloading...")
-        conf['bulk_json_path'] = fetch_bulk_json(conf['user_agent'], conf['accept'])
-        write_config()
+    # Set up constants
+    load_scryfall_data_start = time.perf_counter()
 
     logging.info(f"Loading Scryfall bulk json to dictionary from {conf['bulk_json_path']}")
     card_data = load_card_dictionary(conf['bulk_json_path'])
+    
+    load_scryfall_data_end = time.perf_counter()
+    logging.info(f"Finished in {load_scryfall_data_end - load_scryfall_data_start:.2f} seconds")
 
     logging.info(f"Reading decklist from {conf['decklist_path']}")
-    deck_data = read_decklist(conf['decklist_path'])
-    logging.info(f"Found {len(deck_data)} entries in decklist")
+    decklist = []
+    read_decklist(conf['decklist_path'])
+    logging.info(f"Found {len(decklist)} cards to print in decklist")
 
     
 
     logging.info("Creating PDF")
+    # --- Generate constants ---
+    const = generate_constants()
     image_cashe = {}
-    create_grid_pdf(f"image_cache/{conf['image_type']}/", "output/Output.pdf")
-    end = time.perf_counter()
-    logging.info(f"Finished in {end - start_time:.2f} seconds")
+    image_placement_times = []
+    make_pdf_start_time = time.perf_counter()
+    pages = {}
     
+    
+    render_pages()
+    # --- Merge pages into a single PDF ---
+    output_filename = conf['pdf_path']
+    logging.info(f"Merging pages into {output_filename}")
+    merge_pages()
+    
+    make_pdf_end = time.perf_counter()
+    logging.info(f"PDF made in {make_pdf_end - make_pdf_start_time:.2f} seconds")
+    full_end = time.perf_counter()
+    avaarage_image_placement_time = sum(image_placement_times) / len(image_placement_times) if image_placement_times else 0
+    logging.info(f"Finished in {full_end - full_start_time:.2f} seconds, average image placement time: {avaarage_image_placement_time:.2f} seconds")
+
