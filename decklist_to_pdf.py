@@ -252,12 +252,8 @@ def resize_image_to_card_size(image: Image.Image, dpi: int) -> Image.Image:
     :return: resized PIL Image object converted to "RGB"
     """
     # Card size in mm
-    card_width_mm = 63
-    card_height_mm = 88
     # Convert mm to pixels
-    card_width_px = int(card_width_mm * conf['dpi'] / 25.4)
-    card_height_px = int(card_height_mm * conf['dpi'] / 25.4)
-    return image.resize((card_width_px, card_height_px), Image.Resampling.LANCZOS)#.convert("RGB")
+    return image.resize((const['card_width_px'], const['card_height_px']), Image.Resampling.LANCZOS)#.convert("RGB")
 
 def correct_gamma(img:Image.Image) -> Image.Image:
 
@@ -500,7 +496,7 @@ def render_page(page_index:int, side:int) -> None:
     if card_index_start >= deck_size: return
 
     # Create a blank A4 image in pixels at 600 DPI
-    page_image = Image.new('RGBA', (const['page_width_px'], const['page_height_px']), color = (255, 255, 255)) # White background
+    page_image = Image.new('RGB', (const['page_width_px'], const['page_height_px']), color = (255, 255, 255)) # White background
     draw = ImageDraw.Draw(page_image)
     # draw background rectangle
     draw.rectangle(const['bg_box'], fill=(0, 0, 0),width=0)
@@ -562,27 +558,8 @@ def render_page(page_index:int, side:int) -> None:
 
     # Draw_reference_points (in pixels)
     if conf['reference_points']:
-        # Convert marker vectors from mm to pixels
-        marker_vectors_px = [[int(v[0] * const['dpi'] / 25.4), int(v[1] * const['dpi'] / 25.4)] for v in const['marker_vectors']]
-        # Convert grid center from mm to pixels
-        grid_center_x_px = int(const['grid_center_x'] * const['dpi'] / 25.4)
-        grid_center_y_px = int(const['grid_center_y'] * const['dpi'] / 25.4)
-
-        for iterator_vectors in const['marker_iteration']:
-            for vector_px in marker_vectors_px:
-                # Need to adjust the position calculation based on the center and iteration vectors
-                # The original calculation seems complex, let's simplify based on the grid center
-                # Assuming marker_iteration vectors are multipliers for a distance from the center
-                # Let's use a fixed distance from the center for markers, e.g., half the grid width/height
-                dist_x = const['grid_width_px'] / 2
-                dist_y = const['grid_height_px'] / 2
-
-                marker_x = grid_center_x_px + iterator_vectors[0] * dist_x
-                marker_y = grid_center_y_px + iterator_vectors[1] * dist_y
-
-                # Draw a small rectangle for the marker
-                marker_size = 5 # pixels
-                draw.rectangle([marker_x - marker_size/2, marker_y - marker_size/2, marker_x + marker_size/2, marker_y + marker_size/2], fill=(0, 0, 0))
+        for rect in const['marker_rects']:
+                draw.rectangle(rect, fill=(0, 0, 0),width=0)
 
     # store results in pages dict
     buffer = io.BytesIO()
@@ -600,8 +577,6 @@ def render_pages():
     # --- Render pages as images ---
     logging.info("Rendering pages as images...")
     global pages
-    pages = {} # Reset pages to store file paths
-
     with ThreadPoolExecutor(max_workers=conf['worker_threads']) as executor: # Use a config for render threads
         
         for i in range(const['total_pages']):
@@ -657,10 +632,19 @@ def generate_constants() -> dict:
     bg_box_position = [grid_x_offset_px - bg_box_margin_px,grid_y_offset_px - bg_box_margin_px]
     bg_box = [bg_box_position[0],bg_box_position[1],bg_box_position[0]+ bg_box_width_px,bg_box_position[1] + bg_box_height_px]
 
+    
     # --- Location marker sets (converted to pixels if needed in render_page) ---
-    # marker_vectors = [[2*mm,2*mm],[-2*mm,-2*mm]] # Keep original for reference if needed
-    # marker_iteration = [[1,1],[1,-1],[-1,-1],[-1,1]] # Keep original for reference if needed
-
+    marker_vectors = [[mm_to_px(2),mm_to_px(2)],[-mm_to_px(2),-mm_to_px(2)]] # Keep original for reference if needed
+    marker_iteration = [[1,1],[1,-1],[-1,-1],[-1,1]] # Keep original for reference if needed
+    marker_rects = []
+    for iterator_vectors in marker_iteration:
+                for vector in marker_vectors:
+                    pos = [grid_center_x_px + mm_to_px(iterator_vectors[0] * 193/2), grid_center_y_px + mm_to_px(iterator_vectors[1] * 278/2)]
+                    sorted_x = [pos[0],pos[0]+vector[0]]
+                    sorted_y = [pos[1],pos[1]+vector[1]]
+                    sorted_x.sort()
+                    sorted_y.sort()
+                    marker_rects.append([sorted_x[0], sorted_y[0], sorted_x[1], sorted_y[1]])
     # --- Calculate Card Positions (in pixels) ---
     card_positions_px = []
 
@@ -697,27 +681,13 @@ def generate_constants() -> dict:
     return {
         'deck_size': len(decklist),
         'total_pages': (len(decklist) + 8) // 9,  # 9 cards per page
-        'card_width_mm': card_width_mm, # Keep mm values for reference
-        'card_height_mm': card_height_mm,
-        'spacing_mm': spacing_mm,
-        'bg_box_margin_mm': bg_box_margin_mm,
-        'card_width_px': card_width_px, # New pixel values
+        'card_width_px': card_width_px, # Keep mm values for reference
         'card_height_px': card_height_px,
-        'spacing_px': spacing_px,
-        'bg_box_margin_px': bg_box_margin_px,
-        'bg_box_height_px': bg_box_height_px,
-        'bg_box_width_px': bg_box_width_px,
+        'spacing_mm': spacing_mm,
         'bg_box': bg_box,
         'page_width_px': page_width_px,
         'page_height_px': page_height_px,
-        'grid_width_px': grid_width_px,
-        'grid_height_px': grid_height_px,
-        'grid_x_offset_px': grid_x_offset_px,
-        'grid_y_offset_px': grid_y_offset_px,
-        'grid_center_x': grid_center_x_px, # Store center in pixels
-        'grid_center_y': grid_center_y_px,
-        'marker_vectors': [[mm_to_px(v[0]), mm_to_px(v[1])] for v in [[2,2],[-2,-2]]], # Convert marker vectors to pixels
-        'marker_iteration': [[1,1],[1,-1],[-1,-1],[-1,1]], # Keep iteration pattern
+        'marker_rects': marker_rects,
         'card_positions_px': card_positions_px, # Store positions in pixels
         'image_format': image_format,
         'dpi': dpi # Store DPI
