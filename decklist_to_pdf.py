@@ -253,7 +253,7 @@ def resize_image_to_card_size(image: Image.Image, dpi: int) -> Image.Image:
     """
     # Card size in mm
     # Convert mm to pixels
-    return image.resize((const['card_width_px'], const['card_height_px']), Image.Resampling.LANCZOS)#.convert("RGB")
+    return image.resize((const['card_width_px'], const['card_height_px']), Image.Resampling.LANCZOS).convert("RGB")
 
 def correct_gamma(img:Image.Image) -> Image.Image:
 
@@ -535,10 +535,10 @@ def render_page(page_index:int, side:int) -> None:
                     # --- Calculate image position in pixels ---
                     # Card positions are already calculated in pixels in generate_constants
                     # --- to aligne backside with the front draw_x needs to be fliped for the other side
-                    x_index = row_index
-                    if side == 1: x_index = 2 - row_index
-                    draw_x = const['card_positions_px'][col_index][x_index][0]
-                    draw_y = const['card_positions_px'][col_index][x_index][1]
+                    x_index = col_index
+                    if side == 1: x_index = 2 - col_index
+                    draw_x = const['card_positions_px'][row_index][x_index][0]
+                    draw_y = const['card_positions_px'][row_index][x_index][1]
 
                     # --- Paste Image onto the page ---
                     page_image.paste(img, (draw_x, draw_y))
@@ -550,7 +550,7 @@ def render_page(page_index:int, side:int) -> None:
 
 
                 card_index += 1
-
+                # --- Perfornance logging ---
                 image_placement_time_end = time.perf_counter()
                 image_placement_time = image_placement_time_end - image_placement_time_start
                 #logging.info(f"Placed {key} in {(image_placement_time*100):0f} milliseconds")
@@ -562,11 +562,19 @@ def render_page(page_index:int, side:int) -> None:
                 draw.rectangle(rect, fill=(0, 0, 0),width=0)
 
     # store results in pages dict
+    buffer_time_start = time.perf_counter()
     buffer = io.BytesIO()
     page_image.save(buffer, format='PNG')
     buffer.seek(0)
-    pages[f"{page_index},{side}"] = io.BytesIO(img2pdf.convert(buffer))
+    buffer_time_end = time.perf_counter()
+    page_buffer_time = buffer_time_end - buffer_time_start 
+    logging.info(f"Buffered page {page_index} {'front' if side == 0 else 'back'} in {(page_buffer_time*100):0f} milliseconds")
     
+    buffer_time_start = time.perf_counter()
+    pages[f"{page_index},{side}"] = io.BytesIO(img2pdf.convert(buffer,layout_fun=const['A4']))
+    buffer_time_end = time.perf_counter()
+    page_buffer_time = buffer_time_end - buffer_time_start 
+    logging.info(f"Img2pdf for page {page_index} {'front' if side == 0 else 'back'} in {(page_buffer_time*100):0f} milliseconds")
     #pages[f"{page_index},{side}"] = page_image
 
 def render_pages():
@@ -597,7 +605,7 @@ def generate_constants() -> dict:
     card_height_mm = 88
     spacing_mm = conf['spacing']
     bg_box_margin_mm = 2 # This might not be needed anymore with PIL drawing
-    dpi = 600 # Fixed DPI for rendering
+    dpi = conf['dpi'] # Fixed DPI for rendering
 
     # --- Convert mm to pixels ---
     mm_to_px = lambda val_mm: int(val_mm * dpi / 25.4)
@@ -651,14 +659,15 @@ def generate_constants() -> dict:
     for row in range(3):
         card_positions_px.append([])
         for pos in range(3):
-            x = grid_x_offset_px + pos * (card_width_px + spacing_px)
+            x = grid_x_offset_px +  pos * (card_width_px + spacing_px)
             # Y calculation needs adjustment for pixel coordinates (0,0 is top-left in PIL)
             # We want the bottom-left corner of the card to be at the calculated position
             # The grid_y_offset_px is the distance from the bottom of the page to the bottom of the grid
             # So, the y position for a card is page_height_px - (grid_y_offset_px + (row + 1) * card_height_px + row * spacing_px)
-            y = page_height_px - (grid_y_offset_px + (row + 1) * card_height_px + row * spacing_px)
+            y = page_height_px - (grid_y_offset_px + (3 - row) * card_height_px + row * spacing_px)
             card_positions_px[row].append([int(x), int(y)]) # Ensure pixel coordinates are integers
-
+    a4inpt = (img2pdf.mm_to_pt(210),img2pdf.mm_to_pt(297))
+    A4 = img2pdf.get_layout_fun(a4inpt)
     """bg_box_per_card = []
     for row in range(3):
         bg_box_per_card.append([])
@@ -690,7 +699,9 @@ def generate_constants() -> dict:
         'marker_rects': marker_rects,
         'card_positions_px': card_positions_px, # Store positions in pixels
         'image_format': image_format,
-        'dpi': dpi # Store DPI
+        'dpi': dpi, # Store DPI
+        'A4': A4,
+        'commander': decklist[0]['name']
     }
 
 def merge_pages() -> None:
@@ -699,10 +710,13 @@ def merge_pages() -> None:
     :return: None
     """
     global pages, conf, const
-    output_filename = conf['pdf_path']
+    
+    output_filename = const['decklist']
+    if const['decklist'] != "decklist.txt":
+        output_filename = const['commander']
     if not output_filename.endswith('.pdf'):
         output_filename += '.pdf'
-    output = bytes()
+    #output = bytes()
     merger = PdfMerger()
     pattern = []
     logging.info(f"Merging {len(pages)} page images into {output_filename}")
@@ -728,7 +742,7 @@ def merge_pages() -> None:
         i+=2
     try:
         # write output.pdf
-        with open(output_filename, "wb") as f:
+        with open("output/"+output_filename, "wb") as f:
             merger.write(f)
         logging.info(f"PDF created successfully at {output_filename}")
 
@@ -916,13 +930,16 @@ if __name__ == '__main__':
     load_scryfall_data_end = time.perf_counter()
     logging.info(f"Finished in {load_scryfall_data_end - load_scryfall_data_start:.2f} seconds")
 
-    logging.info(f"Reading decklist from {conf['decklist_path']}")
+    logging.info(f"Reading decklist from input/""input"".text")
     decklist = []
+    decklist_name = input("Enter decklist name (default: decklist.txt): ").strip()
+    conf['decklist_path'] = f"input/{decklist_name}.txt"
     read_decklist(conf['decklist_path'])
     logging.info(f"Found {len(decklist)} cards to print in decklist")
     
     # Set up constants
     const = generate_constants()
+    const.update({'decklist': decklist_name})
 
     logging.info("Creating PDF")
     image_cashe = {} # Initialize image_cashe here
@@ -933,8 +950,7 @@ if __name__ == '__main__':
     render_pages()
     # --- Merge pages into a single PDF ---
     merge_time_start = time.perf_counter()
-    output_filename = conf['pdf_path']
-    logging.info(f"Merging pages into {output_filename}")
+    logging.info(f"Merging pages into PDF")
     merge_pages()
     merge_time_end = time.perf_counter()
     logging.info(f"PDF merged in {(merge_time_end - merge_time_start)*1000:.0f} milliseconds")
@@ -943,4 +959,4 @@ if __name__ == '__main__':
     logging.info(f"PDF made in {make_pdf_end - make_pdf_start_time:.2f} seconds")
     full_end = time.perf_counter()
     avaarage_image_placement_time = sum(image_placement_times) / len(image_placement_times) if image_placement_times else 0
-    logging.info(f"Finished in {full_end - full_start_time:.2f} seconds, average image placement time: {(avaarage_image_placement_time)*1000:.0f} seconds")
+    logging.info(f"Finished in {full_end - full_start_time:.2f} seconds, average image placement time: {(avaarage_image_placement_time)*1000:.0f} milliseconds")
