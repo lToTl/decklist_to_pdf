@@ -1,5 +1,5 @@
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import sleep, time
 from urllib.request import urlretrieve, Request
 # Removed reportlab imports: from reportlab.lib.pagesizes import A4
@@ -21,8 +21,8 @@ import math # Added math for pixel calculations
 #import gc
 
 
-def load_card_dictionary(filepath) -> dict:
-
+def load_card_dictionary() -> dict:
+    filepath = conf['bulk_json_path']
     card_dict = {}
     print(f'{filepath.split('/')[0]}/parsed_{filepath.split('/')[-1]}')
     if os.path.exists(f'{filepath.split('/')[0]}/parsed_{filepath.split('/')[-1]}'):
@@ -70,6 +70,13 @@ def load_card_dictionary(filepath) -> dict:
                                         'other_face': f"{key}_{'B' if side == 'A' else 'A'}",
                                         'border_color': card['border_color']}
                             side = 'B'
+                        card_dict[key] = {'name': card['name'],
+                            'set': card['set'],
+                            'collector_number': card['collector_number'],
+                            'layout': card['layout'],
+                            'two_sided': True,
+                            'faces': [card_dict[f"{key}_A"], card_dict[f"{key}_B"]],
+                            'border_color': card['border_color'],}
 
                     elif card['layout'] in {
                         'normal',
@@ -132,18 +139,82 @@ def add_card_data_to_decklist(card_data: dict) -> None:
     :return: None
     """
     i = 0
-    copies = card_data['copies']
-    card_data.pop('copies', None)  # Remove copies from card_data
-    while i < copies:
-        if 'sides' in card_data and card_data['sides'] is not None and not conf['two_sided'] and not card_data['custom']:
+    copies = card_data.pop('copies', None)  # Remove copies from card_data
+    data_to_add = []
+    if 'sides' in card_data and card_data['sides'] is not None:
+        if not card_data['composite'] and not card_data['custom']:
+            
+            ab = '_A'
+            
+            if conf['custom_backside'] or not conf['two_sided']:
+                for side in card_data['sides']:
+                    side.update({'key': f"{card_data['key']}{ab}", 'custom': card_data['custom'], 'two_sided': card_data['two_sided']})
+                    data_to_add.append([side])
+                    ab = '_B'
+
+            if conf['two_sided'] and conf['custom_backside']:
+                for side in card_data['sides']:
+                    side.update({'key': f"{card_data['key']}{ab}", 'custom': card_data['custom'], 'two_sided': card_data['two_sided']})
+                    card_with_back = { 'sides' : [side.copy(),{'key': "back"}]}
+                    data_to_add.append(card_with_back)
+                    ab = '_B'
+
+        if not card_data['composite']:
             for side in card_data['sides']:
-                decklist.append(side)
+                side.update({'key': card_data['key'], 'custom': card_data['custom'], 'two_sided': card_data['two_sided']})
+            data_to_add = [card_data]
         else:
-            decklist.append(card_data)
+            for side in card_data['sides']:
+                side.update({'custom': False})
+            data_to_add = [{'sides': card_data['sides']}]  
+
+    elif conf['custom_backside'] and not card_data['composite']:
+        data_to_add = [{'sides': [card_data, {'key': "back"}]}]
+        
+        
+    while i < copies:
+        decklist.extend(data_to_add)
         i += 1
+
+def card_data_lookup(decklist_line:str) -> dict:
+    data = {}
+    set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
+    set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):].strip()
+    key = f"{set_symbol}-{set_number}"
+    force_side = 0
+    if decklist_line.startswith("!!"):
+        force_side = 2
+        decklist_line = decklist_line[2:].strip()
+        #key = f"{key}_B"
+    elif decklist_line.startswith("!"):
+        force_side = 1
+        decklist_line = decklist_line[1:].strip()
+        #key = f"{key}_A"
+    try:
+
+        data = card_data[key]
+    
+    except KeyError as e:
+        #data = {key + "_A":card_data.get(f"{set_symbol}-{set_number}_A"),key + "_B":card_data.get(f"{set_symbol}-{set_number}_B")}
+        raise KeyError(f"Card {decklist_line} not found in card data. Please check the decklist format or the card data.") from e
+    
+    return {
+        'name': decklist_line[:decklist_line.index("(") - 1],
+        'key': key if force_side == 0 else f"{key}_{'A' if force_side == 1 else 'B'}",
+        #'set_symbol': decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower(),
+        #'set_number': decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):].strip(),
+        'black_border': True if data['border_color'] == "black" else False,
+        #'two_sided': data['two_sided'] if force_side == 0 else False,
+        'force_side': force_side,
+        'sides': data['faces'] if data['two_sided'] and force_side==0 else None,
+        #'layout': data['layout'],
+        #'custom': False,
+        'image_uris': data['image_uris'] if 'image_uris' in data else data['faces'][force_side - 1]['image_uris']
+    }
 
 def read_decklist(filepath):
     line_count = 0
+    toPrintList = []
     try:
         with open(filepath, 'r', encoding='utf-8') as decklist_file:
             for decklist_line in decklist_file:
@@ -156,28 +227,31 @@ def read_decklist(filepath):
                 if "|" in decklist_line:
                     cardfaces = []
                     cardfaces = decklist_line.split("||")
-                    cards = []
-                    for card in cardfaces:
-                        card = card.strip()
-                        if card.strip().startswith("*"):
+                    faces = []
+                    for face in cardfaces:
+                        card = face.strip()
+                        if card.startswith("*"):
                             # Custom card, skip card_data lookup
                             name = card[+1:]
                             card = {'name': name, 'key': name, 'black_border': False, 'custom': True}
-                            cards.append(card)
+                            faces.append(card)
                         else:
                             # Normal card, lookup in card_data
-                            cards.append(card_data_lookup(card))
-                    add_card_data_to_decklist({'copies': copies, 'sides': cards, 'two_sided': True, 'custom': True})
+                            faces.append(card_data_lookup(card))
+                    add_card_data_to_decklist({'copies': copies, 'sides': faces, 'two_sided': True, 'composite': True})
+                    for i in range(copies):
+                        toPrintList.append(faces)
+                        i += 1
                     continue
                 if decklist_line.strip().startswith("*"):
                     # Custom card, skip card_data lookup
                     name = decklist_line[decklist_line.index("*")+1:].strip()
-                    entry = {'name': name, 'key' : name, 'two_sided': False, 'black_border': False, 'custom': True, 'copies': copies}
+                    entry = {'name': name, 'key' : name, 'two_sided': False, 'black_border': False, 'custom': True, 'composite': False, 'copies': copies}
                     add_card_data_to_decklist(entry)
                     continue
                 # Normal card, lookup in card_data
                 entry = card_data_lookup(decklist_line)
-                entry.update({'copies': copies})
+                entry.update({'copies': copies, 'composite': False, 'two_sided': False, 'custom': False})
                 add_card_data_to_decklist(entry)
         return
     except FileNotFoundError:
@@ -187,48 +261,12 @@ def read_decklist(filepath):
         logging.error(f"Error reading decklist file {filepath} on line {line_count}: {e}")
         raise e
 
-def card_data_lookup(decklist_line:str) -> dict:
-    data = {}
-    set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
-    set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):].strip()
-    key = f"{set_symbol}-{set_number}"
-    force_side = 0
-    if decklist_line.startswith("!!"):
-        force_side = 2
-        decklist_line = decklist_line[2:].strip()
-        key = f"{key}_B"
-    elif decklist_line.startswith("!"):
-        force_side = 1
-        decklist_line = decklist_line[1:].strip()
-        key = f"{key}_A"
-    try:
-
-        data = card_data[key]
-    except KeyError as e:
-        raise KeyError(f"Card {decklist_line} not found in card data. Please check the decklist format or the card data.") from e
-
-    return {
-        'name': decklist_line[:decklist_line.index("(") - 1],
-        'key': key,
-        'set_symbol': decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower(),
-        'set_number': decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):].strip(),
-        'black_border': True if data['border_color'] == "black" else False,
-        'two_sided': data['two_sided'] if not force_side>0 else False,
-        'force_side': force_side,
-        'sides': data['faces'] if data['two_sided'] and force_side==0 else None,
-        'layout': data['layout'],
-        'custom': False,
-        'image_uris': data['image_uris'] if 'image_uris' in data else {
-            'small': 'custom_cards/{key}.jpg',
-            'normal': 'custom_cards/{key}.jpg',
-            'large': f'custom_cards/{key}.jpg',
-            'png': f'custom_cards/{key}.png',
-            'art_crop': None,
-            'border_crop': None
-        }
-    }
-
-def fetch_bulk_json():
+def fetch_bulk_json(ask:bool=True) -> str:
+    global conf
+    if ask:
+        if input("Do you want to update Scryfall bulk JSON? (y/n): ").strip().lower() != 'y':
+            logging.info("Skipping Scryfall bulk JSON download.")
+            return conf['bulk_json_path']
     headers = {'User-Agent': conf['user_agent'],
                'Accept': conf['accept']}
     response = requests.get('https://api.scryfall.com/bulk-data/default-cards', headers=headers)
@@ -236,7 +274,10 @@ def fetch_bulk_json():
     json_response = response.json()
     bulk_json_uri = json_response['download_uri']
     local_filename = f"scryfall_bulk_json/{bulk_json_uri.split('/')[-1]}"
-
+    conf.update({'bulk_json_path': local_filename})
+    write_config(['bulk_json_path'])
+    if os.path.exists(local_filename):
+        return local_filename
     request = Request(bulk_json_uri, headers=headers)
     if not os.path.exists(local_filename):
         logging.info('Downloading new scryfall ')
@@ -255,55 +296,12 @@ def resize_image_to_card_size(image: Image.Image, dpi: int) -> Image.Image:
     # Convert mm to pixels
     return image.resize((const['card_width_px'], const['card_height_px']), Image.Resampling.LANCZOS).convert("RGB")
 
-def correct_gamma(img:Image.Image) -> Image.Image:
 
-    img_width, img_height = img.size
-    # Ensure image is not empty before getting pixel
-    if img_width == 0 or img_height == 0:
-        logging.error('Gamma correction imput 0 size') 
-        raise Exception 
     
-    border_color = img.getpixel((int(img_width/2), int(img_height - img_height/50)))
-    if border_color is None:
-        logging.error('Gamma correction cant get border color') 
-        raise Exception 
-    # Handle grayscale and color images
-    if isinstance(border_color, (tuple, list)):
-            border_gamma = sum(border_color[:3]) / 3
-    elif isinstance(border_color, (int, float)):
-        border_gamma = border_color
-    else:
-        logging.error('Gamma correction: Unknown format') 
-        raise Exception 
-
-    # Avoid infinite loops with extreme gamma values
-    if border_gamma > 100:
-        logging.error('Gamma correction: border color too bright')
-        raise Exception
-    
-    while border_gamma > 3:
-        enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(1 + border_gamma * 1 / 256)
-        try:
-            border_color = img.getpixel((int(img_width/2), int(img_height - img_height/50)))
-        except IndexError:
-            break # Exit if image becomes too small
-
-        if isinstance(border_color, (tuple, list)):
-             if len(border_color) >= 3:
-                border_gamma = sum(border_color[:3]) / 3
-             else:
-                border_gamma = border_color[0] if border_color else 0
-        elif isinstance(border_color, (int, float)):
-            border_gamma = border_color
-        else:
-            break
-        if border_gamma < 3:
-            break
-    return img
 
 def fetch_image(image_url:str, destination:str, headers, key:str, custom:bool) -> None:
-    img = None
+    img = Image.new('RGB', (1, 1), color=(255, 255, 255)) # Placeholder image
+    gc_path = ""
     if not custom:
         parts = destination.split('/')
         dpi_destination = f"{parts[0]}/{conf['dpi']}/{parts[1]}/{parts[2]}"
@@ -316,81 +314,219 @@ def fetch_image(image_url:str, destination:str, headers, key:str, custom:bool) -
     if image_url is None:
         logging.error(f"Image URL for {key} is None. Skipping download.")
         return
+    retries = 3
+
+    def download_image():
+        """
+        Download the image from the URL and save it to the destination.
+        """
+        nonlocal retries
+        nonlocal img
+        try:
+            logging.info(f"Downloading image {destination}")
+            img = Image.open(io.BytesIO(requests.get(image_url, headers=headers).content))
+            img.save(destination, const['image_format'])
+            img.load()
+        except Exception as e:
+            retries -= 1
+            logging.error(f"Error downloading or processing image {image_url}: {e}")
+            if retries > 0:
+                logging.info(f"Retrying download for {image_url} ({retries} retries left)")
+                sleep(1)
+    
+    def open_image():
+        """
+        Open the image from the destination.
+        """
+        nonlocal retries
+        nonlocal img
+        try:
+            with Image.open(destination) as opened_img:
+                opened_img.load()
+                img = opened_img.copy()
+        except Exception as e:
+            
+            logging.error(f"Error opening image {destination}: {e}")
+            if retries > 0:
+                retries -= 1
+                logging.info(f"Retrying download for {image_url} ({retries} retries left)")
+                
+                # Ensure file is closed before deleting
+                try:
+                    opened_img.close() # type: ignore
+                except Exception:
+                    pass
+                if os.path.exists(destination):
+                    logging.info(f"Removing existing image {destination} and retrying download")
+                    sleep(1)
+                    os.remove(destination)
+                download_image()
+            else:
+                raise e
+    
+    def open_image_dpi():
+        """
+        Open the image from the DPI destination.
+        """
+        nonlocal img,retries
+        try:
+             with Image.open(dpi_destination) as opened_img:
+                opened_img.load()
+                img = opened_img.copy()  # Copy to keep in memory after closing file
+        except Exception as e:
+            logging.error(f"Error opening image {dpi_destination}: {e}, trying to scale again")
+            if retries > 0:
+                retries -= 1
+                logging.info(f"Retrying download for {image_url} ({retries} retries left)")
+                img.close()
+                sleep(1)
+                os.remove(dpi_destination)
+                resize_image()
+            else:
+                raise e
+
+    def open_image_gc():
+        """
+        Open the gamma corrected image from the cache.
+        """
+        nonlocal img,retries
+        try:
+            with Image.open(gc_path) as opened_img:
+                opened_img.load()
+                img = opened_img.copy()  # Copy to keep in memory after closing file
+        except Exception as e:
+            logging.error(f"Error opening cached image {gc_path}: {e}, tring to correct gamma")
+            # Ensure file is closed before deleting
+            try:
+                if 'opened_img' in locals():
+                    opened_img.close() # type: ignore
+            except Exception:
+                pass
+            if retries > 0:
+                retries -= 1
+                sleep(0.1)
+                if os.path.exists(gc_path):
+                    try:
+                        os.remove(gc_path)
+                    except PermissionError as pe:
+                        logging.error(f"PermissionError while deleting {gc_path}: {pe}")
+                        sleep(0.2)
+                        # Try again after a short wait
+                        try:
+                            os.remove(gc_path)
+                        except Exception as pe2:
+                            logging.error(f"Still cannot delete {gc_path}: {pe2}")
+                            raise pe2
+                
+                open_image_dpi()
+                correct_image_gamma()
+            else:
+                raise e
+
+    def resize_image():
+        """
+        Resize the image to the target card size in pixels at the specified DPI.
+        """
+        nonlocal img
+        open_image()
+        img = img.resize((const['card_width_px'], const['card_height_px']), Image.Resampling.LANCZOS).convert("RGB")
+        img.save(dpi_destination, const['image_format'])
+        img.load()
+    
+    def correct_image_gamma():
+        """
+        Apply gamma correction to the image if needed.
+        """
+        nonlocal img,retries
+
+        try:
+            img_width, img_height = img.size
+            # Ensure image is not empty before getting pixel
+            if img_width == 0 or img_height == 0:
+                logging.error('Gamma correction imput 0 size') 
+                raise Exception 
+            
+            border_color = img.getpixel((int(img_width/2), int(img_height - img_height/50)))
+            if border_color is None:
+                logging.error('Gamma correction cant get border color') 
+                raise Exception 
+            # Handle grayscale and color images
+            if isinstance(border_color, (tuple, list)):
+                    border_gamma = sum(border_color[:3]) / 3
+            elif isinstance(border_color, (int, float)):
+                border_gamma = border_color
+            else:
+                logging.error('Gamma correction: Unknown format') 
+                raise Exception 
+
+            # Avoid infinite loops with extreme gamma values
+            if border_gamma > 100:
+                logging.error('Gamma correction: border color too bright')
+                raise Exception
+            
+            while border_gamma > 3:
+                enhancer = ImageEnhance.Contrast(img)
+                img = enhancer.enhance(1 + border_gamma * 1 / 256)
+                try:
+                    border_color = img.getpixel((int(img_width/2), int(img_height - img_height/50)))
+                except IndexError:
+                    break # Exit if image becomes too small
+
+                if isinstance(border_color, (tuple, list)):
+                    if len(border_color) >= 3:
+                        border_gamma = sum(border_color[:3]) / 3
+                    else:
+                        border_gamma = border_color[0] if border_color else 0
+                elif isinstance(border_color, (int, float)):
+                    border_gamma = border_color
+                else:
+                    break
+                if border_gamma < 3:
+                    break
+            img.save(gc_path)
+            img.load()
+            logging.info(f"Gamma correction applied to {dpi_destination}")
+        
+        except Exception as e:
+            logging.error(f"Error applying gamma correction to {dpi_destination}, rescaling image")
+            img.close()
+            if retries > 0:
+                retries -= 1
+                logging.info(f"Retrying reziseing for {image_url} ({retries} retries left)")
+                sleep(1)
+                os.remove(dpi_destination)
+                resize_image()
+            else:
+                logging.error(f"Failed to apply gamma correction after multiple attempts: {e}")
+            raise e
+    
+    # If custom card, use custom card path and skip gamma correction
     if custom:
         if not os.path.exists(dpi_destination):
-            try:
-                img = Image.open(destination)
-                img.load()
-            except Exception as e:
-                logging.error(f"Error opening cached image {gc_path}: {e}")
-                raise e # Do not proceed with missing images!
-            img = resize_image_to_card_size(img, conf['dpi'])
-            img.save(dpi_destination, const['image_format'])
-            img.load()
+            open_image()
+            resize_image()
         else: 
-            try:
-                img = Image.open(dpi_destination)
-                img.load()
-            except Exception as e:
-                logging.error(f"Error opening cached image {dpi_destination}: {e}")
-                raise e # Do not proceed with missing images!
+            open_image_dpi()
         image_cashe.update({key:img})
         return
-    
+
+    # Check if the image already exists in the cache
     if not os.path.exists(gc_path):
         if not os.path.exists(dpi_destination):
             if not os.path.exists(destination):
-                logging.info(f"Downloading image {destination}")
-                try:
-                    img_bytes = requests.get(image_url, headers=headers).content
-                    img = Image.open(io.BytesIO(img_bytes))
-                    img.save(destination, const['image_format'])
-                    img.load()
-                except Exception as e:
-                    logging.error(f"Error downloading or processing image {image_url}: {e}")
-                    raise e # Do not proceed with missing images! 
-            
+                download_image()
             else:
-                try:
-                    img = Image.open(destination)
-                    img.load()
-                except Exception as e:
-                    logging.error(f"Error opening cached image {destination}: {e}")
-                    raise e # Do not proceed with missing images! 
-                        
-            img = resize_image_to_card_size(img, conf['dpi']) # Resize to card size in pixels at 600 DPI
-            img.save(dpi_destination, const['image_format'])
-            img.load()
-        else: 
-            try:
-                img = Image.open(dpi_destination)
-                img.load()
-            except Exception as e:
-                logging.error(f"Error opening cached image {dpi_destination}: {e}")
-                raise e # Do not proceed with missing images!
-            try:
-                img = correct_gamma(img)
-                img.save(gc_path)
-                img.load()
-                logging.info(f"Gamma correction applied to {dpi_destination}")
-            except Exception as e:
-                logging.error(f"Error applying gamma correction to {dpi_destination}: {e}")
-                raise e # Do not proceed with missing images!     
-    else:
-        if conf['gamma_correction'] and not custom:
-            try:
-                img = Image.open(gc_path)
-                img.load()
-            except Exception as e:
-                logging.error(f"Error opening cached image {gc_path}: {e}")
-                raise e # Do not proceed with missing images!
+                open_image()
+            resize_image()
         else:
-            try:
-                img = Image.open(dpi_destination)
-                img.load()
-            except Exception as e:
-                logging.error(f"Error opening cached image {gc_path}: {e}")
-                raise e # Do not proceed with missing images!
+            open_image_dpi()
+        if conf['gamma_correction']:
+            correct_image_gamma()    
+    else:
+        if conf['gamma_correction']:
+            open_image_gc()
+        else:
+           open_image_dpi()
 
     
     # Add image data to cache
@@ -410,75 +546,50 @@ def create_image_cache()    -> None:
     headers = {'User-Agent': conf['user_agent'],
             'Accept': conf['accept']}
     image_cashe_timer_start = time.perf_counter()
+    futures = []
     with ThreadPoolExecutor(conf['worker_threads']) as executor:
-
+        done_keys = ['','']
         for decklist_line in decklist:
-            image_uri = ""
-            if 'sides' in decklist_line and decklist_line['sides'] is not None:
-                if decklist_line['sides'][0]['force_side'] == 2:
-                    a =2
-                    # Force side B, skip side A
 
-            if decklist_line['sides'] is not None:
+            
+            if 'sides' in decklist_line and decklist_line['sides'] is not None:
                 for side in decklist_line['sides']:
-                    if side['custom']:
-                        executor.submit(fetch_image, f"custom_cards/{side['name']}.png", f"custom_cards/{side['name']}.{image_format}", headers,side['key'],True)
+                    if side['key'] == 'back' or side['key'] in done_keys :
                         continue
-                    layout = side['layout']
+                    if side['custom']:
+                        futures.append(executor.submit(fetch_image, f"custom_cards/{side['name']}.png", f"custom_cards/{side['name']}.{image_format}", headers,side['key'],True))
+                        continue
+                    
                     # Check if the image already exists in the cache as a one-sided or two-sided card and if the name starts with the marker "*" denoting a custom card
                     # sleep after every downloading thread is started to avid losing api
-                    if not decklist_line['two_sided'] :
-                        image_uri = card_data[f"{side['key']}"]['image_uris'][image_type]
-                        destination = f"image_cache/{image_type}/{side['key']}.{image_format}"
-                        key = side['key']
-                        executor.submit(fetch_image, image_uri, destination, headers ,key,side['custom'])
-                        if not os.path.exists(destination):
-                            counter += 1
-                            sleep(0.1)
-                        continue
-
-                    if decklist_line['two_sided']:
-                        for side in decklist_line['sides']:
-                            image_uri = side['image_uris'][image_type]
-                            destination = f"image_cache/{image_type}/{side['key']}.{image_format}"
-                            executor.submit(fetch_image, image_uri, destination, headers ,side['key'],side['custom'])
-                            if not os.path.exists(destination):
-                                counter += 1
-                                sleep(0.1)
+                    
                         
-                        continue
-                    raise Exception(f"Unknown card layout {layout}")
-                continue
-            key = decklist_line['key']
-            name = decklist_line['name']
-            if decklist_line['custom']:
-                executor.submit(fetch_image, f"custom_cards/{name}.png", f"custom_cards/{name}.{image_format}", headers ,name,True)
-                counter += 1
-                continue
-
-                # Check if the image already exists in the cache as a one-sided or two-sided card and if the name starts with the marker "*" denoting a custom card
-            
-            
-
-            if not decklist_line['two_sided']:
+                    image_uri = side['image_uris'][image_type]
+                    destination = f"image_cache/{image_type}/{side['key']}.{image_format}"
+                    futures.append(executor.submit(fetch_image, image_uri, destination, headers ,side['key'],side['custom']))
+                    if not os.path.exists(destination):
+                        counter += 1
+                        sleep(0.1)
+                    done_keys.append(side['key'])
+                    #raise Exception(f"Unknown card layout {layout}")
                 
-                image_uri = card_data[f"{key}"]['image_uris'][image_type]
-            destination = f"image_cache/{image_type}/{key}.{image_format}"
-            executor.submit(fetch_image, image_uri, destination, headers ,key,decklist_line['custom'])
-            if not os.path.exists(destination):
-                counter += 1
-                sleep(0.1)
-            continue
 
-            
         # Fech backside if needed
         if conf['custom_backside'] and conf['two_sided']:
             if os.path.exists(f"cardbacks/{conf['backside']}"):
                 #logging.info(f"Loading backside {conf['backside']}")
-                executor.submit(fetch_image, f"cardbacks/{conf['backside']}", f"cardbacks/{conf['backside']}", headers, "back", True)
+                futures.append(executor.submit(fetch_image, f"cardbacks/{conf['backside']}", f"cardbacks/{conf['backside']}", headers, "back", True))
         
         # --- Wait for all threads to finish ---
-        executor.shutdown(wait=True)
+        for future in as_completed(futures):
+            try:
+                future.result()  # This will raise any exception from fetch_image
+            except Exception as e:
+                logging.error(f"Error in fetch_image: {e}")
+                # Optionally, shutdown the executor and exit
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise  # or sys.exit(1)
+        
     ImageCacheTimerEnd = time.perf_counter()
     logging.info(f"Downloaded {counter} new images")
 
@@ -502,7 +613,7 @@ def render_page(page_index:int, side:int) -> None:
     draw.rectangle(const['bg_box'], fill=(0, 0, 0),width=0)
     
 
-    do_B_side_next = False
+    #do_B_side_next = False
 
     card_index = card_index_start
     for row_index in range(3):
@@ -512,28 +623,14 @@ def render_page(page_index:int, side:int) -> None:
                 card = decklist[card_index]
 
                 # --- Determine the key for the image ---
-                key = None
-                if 'sides' in card and card['sides'] is not None:
-                    key = f"{card['sides'][side]['key']}"
-                else:
-                    key = card['key']
-
-                if side == 1:
-                    if conf['custom_backside'] and (not conf['two_sided'] or not card['two_sided']):
-                        if card['two_sided'] and not do_B_side_next: do_B_side_next = True
-                        else: do_B_side_next = False
-                        key = 'back'
-                    elif card['two_sided'] and conf['two_sided']:
-                        if card['custom']:
-                            key = card['sides'][1]['key']
-                        # If not custom, key is already set correctly above
-
-                # --- Get image from cache ---
+                
+                
+                key = card['sides'][side]['key']
+                # fetch image from cache ---
                 img = image_cashe[key]
 
                 if img is not None:
-                    # --- Calculate image position in pixels ---
-                    # Card positions are already calculated in pixels in generate_constants
+                    
                     # --- to aligne backside with the front draw_x needs to be fliped for the other side
                     x_index = col_index
                     if side == 1: x_index = 2 - col_index
@@ -548,8 +645,8 @@ def render_page(page_index:int, side:int) -> None:
                     logging.error(f"Image not found in cache for key: {key}.")
                     raise Exception
 
-
                 card_index += 1
+                #if not do_B_side_next: card_index += 1
                 # --- Perfornance logging ---
                 image_placement_time_end = time.perf_counter()
                 image_placement_time = image_placement_time_end - image_placement_time_start
@@ -571,7 +668,12 @@ def render_page(page_index:int, side:int) -> None:
     logging.info(f"Buffered page {page_index} {'front' if side == 0 else 'back'} in {(page_buffer_time*100):0f} milliseconds")
     
     buffer_time_start = time.perf_counter()
-    pages[f"{page_index},{side}"] = io.BytesIO(img2pdf.convert(buffer,layout_fun=const['A4']))
+    pdf_bytes = img2pdf.convert(buffer, layout_fun=const['A4'])
+    if pdf_bytes is not None:
+        pages.update({f"{page_index},{side}": io.BytesIO(pdf_bytes)})
+    else:
+        logging.error(f"img2pdf.convert returned None for page {page_index}, side {side}")
+        raise ValueError("img2pdf.convert returned None")
     buffer_time_end = time.perf_counter()
     page_buffer_time = buffer_time_end - buffer_time_start 
     logging.info(f"Img2pdf for page {page_index} {'front' if side == 0 else 'back'} in {(page_buffer_time*100):0f} milliseconds")
@@ -688,8 +790,8 @@ def generate_constants() -> dict:
             raise Exception(f"Unknown image type {image_type}")
 
     return {
-        'deck_size': len(decklist),
-        'total_pages': (len(decklist) + 8) // 9,  # 9 cards per page
+        'deck_size': 0,
+        'total_pages': 0,  # 9 cards per page
         'card_width_px': card_width_px, # Keep mm values for reference
         'card_height_px': card_height_px,
         'spacing_mm': spacing_mm,
@@ -701,7 +803,6 @@ def generate_constants() -> dict:
         'image_format': image_format,
         'dpi': dpi, # Store DPI
         'A4': A4,
-        'commander': decklist[0]['name']
     }
 
 def merge_pages() -> None:
@@ -711,15 +812,10 @@ def merge_pages() -> None:
     """
     global pages, conf, const
     
-    output_filename = const['decklist']
-    if const['decklist'] != "decklist.txt":
-        output_filename = const['commander']
-    if not output_filename.endswith('.pdf'):
-        output_filename += '.pdf'
     #output = bytes()
     merger = PdfMerger()
     pattern = []
-    logging.info(f"Merging {len(pages)} page images into {output_filename}")
+    logging.info(f"Merging {len(pages)} page images into {decklist_name} PDF...")
     #def merge(key1,key2): return pages[key1].join(pages[key2])
     pages_imput_array = []
     #with ThreadPoolExecutor(conf['worker_threads']) as executor:
@@ -733,18 +829,18 @@ def merge_pages() -> None:
     i = 0
     
     while i < const['total_pages']:
-
-        for set in pattern:
-            key = f"{i+set[0]},{set[1]}"
-            if i+set[0] == const['total_pages']: continue
-            merger.append(pages[key])
-            pages_imput_array.append(pages[key])
-        i+=2
+        
+            for set in pattern:
+                key = f"{i+set[0]},{set[1]}"
+                if i+set[0] == const['total_pages']: continue
+                merger.append(pages[key])
+                pages_imput_array.append(pages[key])
+            i+=2
     try:
         # write output.pdf
-        with open("output/"+output_filename, "wb") as f:
+        with open("output/"+decklist_name+".pdf", "wb") as f:
             merger.write(f)
-        logging.info(f"PDF created successfully at {output_filename}")
+        logging.info(f"PDF created successfully at output/{decklist_name}.pdf")
 
     except Exception as e:
         logging.error(f"Error merging pages with img2pdf: {e}")
@@ -754,6 +850,11 @@ def write_config(conf_list:list):
     with open('decklist_to_pdf.ini', 'a') as config_file:
         for config in conf_list:
             match config:
+                case 'bulk_json_path':
+                    config_file.write(f"""
+# relative path to scryfall bulk json file
+bulk_json_path:{conf['bulk_json_path']}
+""")
                 case 'decklist_path':
                     config_file.write(f"""
 # relative path to decklist listing unique cards one per line in of the formats:
@@ -876,7 +977,7 @@ def read_config():
                                 conf[key] = value # Keep as string if not int or float
                     if key in conf_update_check: # Check if key exists before setting to True
                         conf_update_check[key] = True
-
+        #conf["bulk_json_path"] = fetch_bulk_json() # Update bulk json path after reading config
     except FileNotFoundError:
         logging.error("decklist_to_pdf.ini inaccessable.")
         # The function is only called if the file is detected something must be wrongw with premissions if you cant readit. 
@@ -888,15 +989,9 @@ def read_config():
         logging.info(f"Writing missing configuration entries: {', '.join(missing_configs)}")
         write_config(missing_configs)
 
-
-if __name__ == '__main__':
-    # Set up logging
-    logging.basicConfig(level=logging.INFO)
-    # Time runtime
-    full_start_time = time.perf_counter()
-    logging.info("Starting decklist_to_pdf script")
-    # Default configuration values
-    conf = {
+def init_config():
+    global conf
+    conf.update({
         'decklist_path' : 'decklist.txt',
         'two_sided': False,
         'custom_backside': False,
@@ -912,34 +1007,48 @@ if __name__ == '__main__':
         'user_agent': 'decklist_to_pdf/0.1',
         'accept': 'application/json;q=0.9,*/*;q=0.8',
         'worker_threads': 4,
-        'dpi': 600
-    }
-    conf.update({'bulk_json_path':fetch_bulk_json()})
+        'dpi': 600,
+        'bulk_json_path':''})
+    
 
-
-    if not os.path.exists('decklist_to_pdf.ini'):
-        write_config(list(conf.keys()))
-    else:
+    if os.path.exists('decklist_to_pdf.ini'):
         logging.info("Loading configuration from decklist_to_pdf.ini")
         read_config()
+    else:
+        logging.info("decklist_to_pdf.ini not found, writing default configuration")
+        conf.update({'bulk_json_path':fetch_bulk_json(ask=False)}) # Fetch bulk json path and update config
+        write_config(list(conf.keys()))
+    
+    conf.update({'bulk_json_path':fetch_bulk_json(ask=True)}) # Fetch bulk json path and update config
 
+if __name__ == '__main__':
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
+    # Time runtime
+    full_start_time = time.perf_counter()
+    logging.info("Starting decklist_to_pdf script")
+    # Default configuration values
+    conf = {}
+    init_config()
+    
 
     load_scryfall_data_start = time.perf_counter()
     logging.info(f"Loading Scryfall bulk json to dictionary from {conf['bulk_json_path']}")
-    card_data = load_card_dictionary(conf['bulk_json_path'])
+    card_data = load_card_dictionary()
     load_scryfall_data_end = time.perf_counter()
     logging.info(f"Finished in {load_scryfall_data_end - load_scryfall_data_start:.2f} seconds")
-
-    logging.info(f"Reading decklist from input/""input"".text")
-    decklist = []
-    decklist_name = input("Enter decklist name (default: decklist.txt): ").strip()
-    conf['decklist_path'] = f"input/{decklist_name}.txt"
-    read_decklist(conf['decklist_path'])
-    logging.info(f"Found {len(decklist)} cards to print in decklist")
-    
     # Set up constants
     const = generate_constants()
-    const.update({'decklist': decklist_name})
+    logging.info(f"Reading decklist from input/""input"".text")
+    decklist = []
+    decklist_name = input(f"Enter decklist name (default: {conf['decklist_path']}): ").strip()
+    if decklist_name != "":
+        conf['decklist_path'] = f"input/{decklist_name}.txt"
+        write_config(['decklist_path'])
+    read_decklist(conf['decklist_path'])
+    logging.info(f"Found {len(decklist)} cards to print in decklist")
+    decklist_name = decklist_name if decklist_name != "" else conf['decklist_path'].split('/')[-1].split('.')[0] # Use the name from the input or the file name if empty
+    const.update({'decklist': conf['decklist_path'], 'deck_size': len(decklist), 'total_pages': (len(decklist) + 8) // 9}) # Update constants with decklist size and total pages
 
     logging.info("Creating PDF")
     image_cashe = {} # Initialize image_cashe here
