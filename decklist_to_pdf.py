@@ -6,7 +6,7 @@ from urllib.request import urlretrieve, Request
 # Removed reportlab imports: from reportlab.pdfgen import canvas
 # Removed reportlab imports: from reportlab.lib.units import mm,inch
 # Removed reportlab imports: from reportlab.lib.utils import ImageReader
-from PyPDF2 import PdfMerger, PdfReader
+from PyPDF2 import PdfMerger#, PdfReader
 from PIL import Image, ImageEnhance, ImageDraw
 import time
 import requests
@@ -14,10 +14,10 @@ import logging
 import orjson
 import os
 import io
-import re
+#import re
 import img2pdf # Added img2pdf
-import glob # Added glob
-import math # Added math for pixel calculations
+#import glob # Added glob
+#import math # Added math for pixel calculations
 #import gc
 
 
