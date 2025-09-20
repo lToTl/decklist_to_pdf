@@ -184,3 +184,5 @@ Deck.pdf
 /custom_cards
 /input
 Output_back.pdf
+.dart_tool/package_config.json
+.dart_tool/package_graph.json

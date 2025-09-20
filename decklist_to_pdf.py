@@ -170,7 +170,8 @@ def add_card_data_to_decklist(card_data: dict) -> None:
 
     elif conf['custom_backside'] and not card_data['composite']:
         data_to_add = [{'sides': [card_data, {'key': "back"}]}]
-        
+    elif not card_data['composite']:
+        data_to_add = [{'sides':[card_data]}]
         
     while i < copies:
         decklist.extend(data_to_add)
@@ -1039,12 +1040,12 @@ if __name__ == '__main__':
     logging.info(f"Finished in {load_scryfall_data_end - load_scryfall_data_start:.2f} seconds")
     # Set up constants
     const = generate_constants()
-    logging.info(f"Reading decklist from input/""input"".text")
     decklist = []
     decklist_name = input(f"Enter decklist name (default: {conf['decklist_path']}): ").strip()
     if decklist_name != "":
         conf['decklist_path'] = f"input/{decklist_name}.txt"
         write_config(['decklist_path'])
+    logging.info(f"Reading decklist from {conf['decklist_path']}")
     read_decklist(conf['decklist_path'])
     logging.info(f"Found {len(decklist)} cards to print in decklist")
     decklist_name = decklist_name if decklist_name != "" else conf['decklist_path'].split('/')[-1].split('.')[0] # Use the name from the input or the file name if empty

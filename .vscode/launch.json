@@ -20,8 +20,13 @@
             "name": "decklist_to_pdf",
             "request": "launch",
             "type": "dart",
-            "program": "bin/main.dart",
-            "cwd": "${workspaceFolder}"
+            "program": "decklist_to_pdf.dart",
+            "args": [
+                "--input",
+                "test_deck.txt",
+                "--output",
+                "test_deck.pdf"
+            ]
         }
     ]
 }

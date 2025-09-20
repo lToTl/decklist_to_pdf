@@ -29,6 +29,7 @@ if not exist cardbacks mkdir cardbacks && echo Created: cardbacks folder
 if not exist custom_cards mkdir custom_cards && echo Created: custom_cards folder
 if not exist image_cache mkdir image_cache && echo Created: image_cache folder
 if not exist output mkdir output && echo Creatrd: output folder
+if not exist input mkdir input && echo Creatrd: input folder
 
 REM Check and create subdirectories in image_cache
 if not exist image_cache\small mkdir image_cache\small && echo Created: image_cache\small
@@ -39,7 +40,7 @@ if not exist image_cache\art_crop mkdir image_cache\art_crop && echo Created: im
 if not exist image_cache\border_crop mkdir image_cache\border_crop && echo Created: image_cache\border_crop
 
 REM Create the decklist file
-if not exist decklist.txt (
+if not exist input/decklist.txt (
     (
     echo 1 Yahenni, Undying Partisan ^(CMM^) 201
     echo 1 Accursed Marauder ^(MH3^) 80
@@ -53,10 +54,10 @@ if not exist decklist.txt (
     echo 1 Dance of the Dead ^(ICE^) 118
     echo 1 Deathgreeter ^(DDD^) 33
     echo 1 Death's-Head Buzzard ^(VMA^) 115
-    ) > decklist.txt
+    ) > input/decklist.txt
     echo Created: decklist.txt
 ) else (
-    echo using existing decklist.txt
+    echo decklist.txt already exists, not overwriting.
 )
 
 REM Activate the virtual environment and run the script
