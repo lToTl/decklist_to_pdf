@@ -20,6 +20,109 @@ import img2pdf # Added img2pdf
 #import math # Added math for pixel calculations
 #import gc
 
+def init_config():
+    global conf
+    conf.update({
+        'decklist_path' : 'decklist.txt',
+        'two_sided': False,
+        'custom_backside': False,
+        'backside': 'back.png',
+        'pdf_path' : 'output.pdf',
+        'image_type' : 'png',
+        'spacing' : 0,
+        'mode' : 'default',
+        'gamma_correction' : True,
+        'reference_points' : True,
+        'stagger': True,
+        'x_axis_offset' : 0.75,
+        'user_agent': 'decklist_to_pdf/0.1',
+        'accept': 'application/json;q=0.9,*/*;q=0.8',
+        'worker_threads': 4,
+        'dpi': 600,
+        'bulk_json_path':''})
+    
+
+    if os.path.exists('decklist_to_pdf.ini'):
+        logging.info("Loading configuration from decklist_to_pdf.ini")
+        read_config()
+    else:
+        logging.info("decklist_to_pdf.ini not found, writing default configuration")
+        conf.update({'bulk_json_path':fetch_bulk_json(ask=False)}) # Fetch bulk json path and update config
+        write_config(list(conf.keys()))
+    
+    conf.update({'bulk_json_path':fetch_bulk_json(ask=True)}) # Fetch bulk json path and update config
+
+def read_config():
+    keys = list(conf.keys())
+    conf_count = 0
+    conf_update_check = conf.copy()
+    conf_update_check.pop('bulk_json_path', None) # Use .pop with default to avoid KeyError
+    for a in conf_update_check.keys():
+        conf_update_check[a] = False
+    try:
+        with open("decklist_to_pdf.ini", "r") as file:
+            conf_count = 0
+            for line in file:
+                if not line.strip() or line.lstrip().startswith('#'):
+                    continue
+                parts = line.strip().split(':')
+                if len(parts) < 2: # Skip lines that don't have a key:value structure
+                    continue
+                key = parts[0].strip()
+                value = ':'.join(parts[1:]).strip() # Handle cases where value contains ':'
+
+                if key in keys:
+                    conf_count += 1
+                    if value == 'True':
+                        conf[key] = True
+                    elif value == 'False':
+                        conf[key] = False
+                    else:
+                        # --- check if the value is a number and convert it if true ---
+                        try:
+                            conf[key] = int(value)
+                        except ValueError:
+                            try:
+                                conf[key] = float(value)
+                            except ValueError:
+                                conf[key] = value # Keep as string if not int or float
+                    if key in conf_update_check: # Check if key exists before setting to True
+                        conf_update_check[key] = True
+        #conf["bulk_json_path"] = fetch_bulk_json() # Update bulk json path after reading config
+    except FileNotFoundError:
+        logging.error("decklist_to_pdf.ini inaccessable.")
+        # The function is only called if the file is detected something must be wrongw with premissions if you cant readit. 
+        raise Exception
+
+    # Write missing config entries
+    missing_configs = [config for config, found in conf_update_check.items() if not found]
+    if missing_configs:
+        logging.info(f"Writing missing configuration entries: {', '.join(missing_configs)}")
+        write_config(missing_configs)
+
+def fetch_bulk_json(ask:bool=True) -> str:
+    global conf
+    if ask:
+        if input("Do you want to update Scryfall bulk JSON? (y/n): ").strip().lower() != 'y':
+            logging.info("Skipping Scryfall bulk JSON download.")
+            return conf['bulk_json_path']
+    headers = {'User-Agent': conf['user_agent'],
+               'Accept': conf['accept']}
+    response = requests.get('https://api.scryfall.com/bulk-data/default-cards', headers=headers)
+    response.raise_for_status()
+    json_response = response.json()
+    bulk_json_uri = json_response['download_uri']
+    local_filename = f"scryfall_bulk_json/{bulk_json_uri.split('/')[-1]}"
+    conf.update({'bulk_json_path': local_filename})
+    write_config(['bulk_json_path'])
+    if os.path.exists(local_filename):
+        return local_filename
+    request = Request(bulk_json_uri, headers=headers)
+    if not os.path.exists(local_filename):
+        logging.info('Downloading new scryfall ')
+        with urllib.request.urlopen(request) as response, open(local_filename, 'wb') as out_file:
+            out_file.write(response.read())
+    return local_filename
 
 def load_card_dictionary() -> dict:
     filepath = conf['bulk_json_path']
@@ -132,6 +235,42 @@ def load_card_dictionary() -> dict:
     logging.info(f"Loaded {len(card_dict)} cards from {filepath}")
     return card_dict
 
+def card_data_lookup(decklist_line:str) -> dict:
+    data = {}
+    set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
+    set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):].strip()
+    key = f"{set_symbol}-{set_number}"
+    force_side = 0
+    if decklist_line.startswith("!!"):
+        force_side = 2
+        decklist_line = decklist_line[2:].strip()
+        #key = f"{key}_B"
+    elif decklist_line.startswith("!"):
+        force_side = 1
+        decklist_line = decklist_line[1:].strip()
+        #key = f"{key}_A"
+    try:
+
+        data = card_data[key]
+    
+    except KeyError as e:
+        #data = {key + "_A":card_data.get(f"{set_symbol}-{set_number}_A"),key + "_B":card_data.get(f"{set_symbol}-{set_number}_B")}
+        raise KeyError(f"Card {decklist_line} not found in card data. Please check the decklist format or the card data.") from e
+    
+    return {
+        'name': decklist_line[:decklist_line.index("(") - 1],
+        'key': key if force_side == 0 else f"{key}_{'A' if force_side == 1 else 'B'}",
+        #'set_symbol': decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower(),
+        #'set_number': decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):].strip(),
+        'black_border': True if data['border_color'] == "black" else False,
+        #'two_sided': data['two_sided'] if force_side == 0 else False,
+        'force_side': force_side,
+        'sides': data['faces'] if data['two_sided'] and force_side==0 else None,
+        #'layout': data['layout'],
+        #'custom': False,
+        'image_uris': data['image_uris'] if 'image_uris' in data else data['faces'][force_side - 1]['image_uris']
+    }
+
 def add_card_data_to_decklist(card_data: dict) -> None:
     """
     Add card data to the decklist dictionary.
@@ -176,42 +315,6 @@ def add_card_data_to_decklist(card_data: dict) -> None:
     while i < copies:
         decklist.extend(data_to_add)
         i += 1
-
-def card_data_lookup(decklist_line:str) -> dict:
-    data = {}
-    set_symbol = decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower()
-    set_number = decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):].strip()
-    key = f"{set_symbol}-{set_number}"
-    force_side = 0
-    if decklist_line.startswith("!!"):
-        force_side = 2
-        decklist_line = decklist_line[2:].strip()
-        #key = f"{key}_B"
-    elif decklist_line.startswith("!"):
-        force_side = 1
-        decklist_line = decklist_line[1:].strip()
-        #key = f"{key}_A"
-    try:
-
-        data = card_data[key]
-    
-    except KeyError as e:
-        #data = {key + "_A":card_data.get(f"{set_symbol}-{set_number}_A"),key + "_B":card_data.get(f"{set_symbol}-{set_number}_B")}
-        raise KeyError(f"Card {decklist_line} not found in card data. Please check the decklist format or the card data.") from e
-    
-    return {
-        'name': decklist_line[:decklist_line.index("(") - 1],
-        'key': key if force_side == 0 else f"{key}_{'A' if force_side == 1 else 'B'}",
-        #'set_symbol': decklist_line[decklist_line.index("(") + 1:decklist_line.index(")")].lower(),
-        #'set_number': decklist_line[len(decklist_line) - decklist_line[::-1].index(" "):].strip(),
-        'black_border': True if data['border_color'] == "black" else False,
-        #'two_sided': data['two_sided'] if force_side == 0 else False,
-        'force_side': force_side,
-        'sides': data['faces'] if data['two_sided'] and force_side==0 else None,
-        #'layout': data['layout'],
-        #'custom': False,
-        'image_uris': data['image_uris'] if 'image_uris' in data else data['faces'][force_side - 1]['image_uris']
-    }
 
 def read_decklist(filepath):
     line_count = 0
@@ -262,30 +365,6 @@ def read_decklist(filepath):
         logging.error(f"Error reading decklist file {filepath} on line {line_count}: {e}")
         raise e
 
-def fetch_bulk_json(ask:bool=True) -> str:
-    global conf
-    if ask:
-        if input("Do you want to update Scryfall bulk JSON? (y/n): ").strip().lower() != 'y':
-            logging.info("Skipping Scryfall bulk JSON download.")
-            return conf['bulk_json_path']
-    headers = {'User-Agent': conf['user_agent'],
-               'Accept': conf['accept']}
-    response = requests.get('https://api.scryfall.com/bulk-data/default-cards', headers=headers)
-    response.raise_for_status()
-    json_response = response.json()
-    bulk_json_uri = json_response['download_uri']
-    local_filename = f"scryfall_bulk_json/{bulk_json_uri.split('/')[-1]}"
-    conf.update({'bulk_json_path': local_filename})
-    write_config(['bulk_json_path'])
-    if os.path.exists(local_filename):
-        return local_filename
-    request = Request(bulk_json_uri, headers=headers)
-    if not os.path.exists(local_filename):
-        logging.info('Downloading new scryfall ')
-        with urllib.request.urlopen(request) as response, open(local_filename, 'wb') as out_file:
-            out_file.write(response.read())
-    return local_filename
-
 def resize_image_to_card_size(image: Image.Image, dpi: int) -> Image.Image:
     """
     Resize an image to the target card size in pixels at the specified DPI.
@@ -296,9 +375,6 @@ def resize_image_to_card_size(image: Image.Image, dpi: int) -> Image.Image:
     # Card size in mm
     # Convert mm to pixels
     return image.resize((const['card_width_px'], const['card_height_px']), Image.Resampling.LANCZOS).convert("RGB")
-
-
-    
 
 def fetch_image(image_url:str, destination:str, headers, key:str, custom:bool) -> None:
     img = Image.new('RGB', (1, 1), color=(255, 255, 255)) # Placeholder image
@@ -534,6 +610,110 @@ def fetch_image(image_url:str, destination:str, headers, key:str, custom:bool) -
     image_cashe.update({key:img})
     return
 
+def generate_constants() -> dict:
+    # --- Constants (in mm) ---
+    card_width_mm = 63
+    card_height_mm = 88
+    spacing_mm = conf['spacing']
+    bg_box_margin_mm = 2 # This might not be needed anymore with PIL drawing
+    dpi = conf['dpi'] # Fixed DPI for rendering
+
+    # --- Convert mm to pixels ---
+    mm_to_px = lambda val_mm: int(val_mm * dpi / 25.4)
+
+    card_width_px = mm_to_px(card_width_mm)
+    card_height_px = mm_to_px(card_height_mm)
+    spacing_px = mm_to_px(spacing_mm)
+    bg_box_margin_px = mm_to_px(bg_box_margin_mm)
+
+    # --- A4 Page Dimensions (in pixels at 600 DPI) ---
+    page_width_px = mm_to_px(210)
+    page_height_px = mm_to_px(297)
+
+    grid_width_px = 3 * card_width_px + 2 * spacing_px
+    grid_height_px = 3 * card_height_px + 2 * spacing_px
+
+    x_axis_offset_mm = float(conf["x_axis_offset"])
+    x_axis_offset_px = mm_to_px(x_axis_offset_mm)
+
+
+    # --- Calculate Grid Offsets (in pixels) ---
+    grid_x_offset_px = ((page_width_px - grid_width_px) / 2 ) + x_axis_offset_px
+    grid_y_offset_px = ((page_height_px - grid_height_px) / 2)
+
+    # --- Calculate Grid Center (in pixels) ---
+    grid_center_x_px = page_width_px / 2 + x_axis_offset_px
+    grid_center_y_px = page_height_px / 2
+
+    # --- calculate black backroud box size and position ---
+    bg_box_width_px = card_width_px*3+bg_box_margin_px*2
+    bg_box_height_px = card_height_px*3+bg_box_margin_px*2
+    bg_box_position = [grid_x_offset_px - bg_box_margin_px,grid_y_offset_px - bg_box_margin_px]
+    bg_box = [bg_box_position[0],bg_box_position[1],bg_box_position[0]+ bg_box_width_px,bg_box_position[1] + bg_box_height_px]
+
+    
+    # --- Location marker sets (converted to pixels if needed in render_page) ---
+    marker_vectors = [[mm_to_px(2),mm_to_px(2)],[-mm_to_px(2),-mm_to_px(2)]] # Keep original for reference if needed
+    marker_iteration = [[1,1],[1,-1],[-1,-1],[-1,1]] # Keep original for reference if needed
+    marker_rects = []
+    for iterator_vectors in marker_iteration:
+                for vector in marker_vectors:
+                    pos = [grid_center_x_px + mm_to_px(iterator_vectors[0] * 193/2), grid_center_y_px + mm_to_px(iterator_vectors[1] * 278/2)]
+                    sorted_x = [pos[0],pos[0]+vector[0]]
+                    sorted_y = [pos[1],pos[1]+vector[1]]
+                    sorted_x.sort()
+                    sorted_y.sort()
+                    marker_rects.append([sorted_x[0], sorted_y[0], sorted_x[1], sorted_y[1]])
+    # --- Calculate Card Positions (in pixels) ---
+    card_positions_px = []
+
+    for row in range(3):
+        card_positions_px.append([])
+        for pos in range(3):
+            x = grid_x_offset_px +  pos * (card_width_px + spacing_px)
+            # Y calculation needs adjustment for pixel coordinates (0,0 is top-left in PIL)
+            # We want the bottom-left corner of the card to be at the calculated position
+            # The grid_y_offset_px is the distance from the bottom of the page to the bottom of the grid
+            # So, the y position for a card is page_height_px - (grid_y_offset_px + (row + 1) * card_height_px + row * spacing_px)
+            y = page_height_px - (grid_y_offset_px + (3 - row) * card_height_px + row * spacing_px)
+            card_positions_px[row].append([int(x), int(y)]) # Ensure pixel coordinates are integers
+    a4inpt = (img2pdf.mm_to_pt(210),img2pdf.mm_to_pt(297))
+    A4 = img2pdf.get_layout_fun(a4inpt)
+    """bg_box_per_card = []
+    for row in range(3):
+        bg_box_per_card.append([])
+        for pos in range(3):
+            x1 = card_positions_px[row][pos][0] - bg_box_margin_px
+            y1 = card_positions_px[row][pos][1] 
+            bg_box_per_card[row].append([int(x1), int(y1),int(x2),int(y2)],) # Ensure pixel coordinates are integers"""
+
+    # --- Determine image file extension ---
+    image_type = conf['image_type']
+    match image_type:
+        case 'small'|'normal'|'large'|'art_crop'|'border_crop':
+            image_format = 'jpg'
+        case 'png':
+            image_format = 'png'
+        case _:
+            logging.error(f"Unknown image type {image_type}")
+            raise Exception(f"Unknown image type {image_type}")
+
+    return {
+        'deck_size': 0,
+        'total_pages': 0,  # 9 cards per page
+        'card_width_px': card_width_px, # Keep mm values for reference
+        'card_height_px': card_height_px,
+        'spacing_mm': spacing_mm,
+        'bg_box': bg_box,
+        'page_width_px': page_width_px,
+        'page_height_px': page_height_px,
+        'marker_rects': marker_rects,
+        'card_positions_px': card_positions_px, # Store positions in pixels
+        'image_format': image_format,
+        'dpi': dpi, # Store DPI
+        'A4': A4,
+    }
+
 def create_image_cache()    -> None:
     image_type = conf['image_type']
     image_format = const['image_format']
@@ -702,110 +882,6 @@ def render_pages():
 
     logging.info("Finished rendering pages as images.")
 
-def generate_constants() -> dict:
-    # --- Constants (in mm) ---
-    card_width_mm = 63
-    card_height_mm = 88
-    spacing_mm = conf['spacing']
-    bg_box_margin_mm = 2 # This might not be needed anymore with PIL drawing
-    dpi = conf['dpi'] # Fixed DPI for rendering
-
-    # --- Convert mm to pixels ---
-    mm_to_px = lambda val_mm: int(val_mm * dpi / 25.4)
-
-    card_width_px = mm_to_px(card_width_mm)
-    card_height_px = mm_to_px(card_height_mm)
-    spacing_px = mm_to_px(spacing_mm)
-    bg_box_margin_px = mm_to_px(bg_box_margin_mm)
-
-    # --- A4 Page Dimensions (in pixels at 600 DPI) ---
-    page_width_px = mm_to_px(210)
-    page_height_px = mm_to_px(297)
-
-    grid_width_px = 3 * card_width_px + 2 * spacing_px
-    grid_height_px = 3 * card_height_px + 2 * spacing_px
-
-    x_axis_offset_mm = float(conf["x_axis_offset"])
-    x_axis_offset_px = mm_to_px(x_axis_offset_mm)
-
-
-    # --- Calculate Grid Offsets (in pixels) ---
-    grid_x_offset_px = ((page_width_px - grid_width_px) / 2 ) + x_axis_offset_px
-    grid_y_offset_px = ((page_height_px - grid_height_px) / 2)
-
-    # --- Calculate Grid Center (in pixels) ---
-    grid_center_x_px = page_width_px / 2 + x_axis_offset_px
-    grid_center_y_px = page_height_px / 2
-
-    # --- calculate black backroud box size and position ---
-    bg_box_width_px = card_width_px*3+bg_box_margin_px*2
-    bg_box_height_px = card_height_px*3+bg_box_margin_px*2
-    bg_box_position = [grid_x_offset_px - bg_box_margin_px,grid_y_offset_px - bg_box_margin_px]
-    bg_box = [bg_box_position[0],bg_box_position[1],bg_box_position[0]+ bg_box_width_px,bg_box_position[1] + bg_box_height_px]
-
-    
-    # --- Location marker sets (converted to pixels if needed in render_page) ---
-    marker_vectors = [[mm_to_px(2),mm_to_px(2)],[-mm_to_px(2),-mm_to_px(2)]] # Keep original for reference if needed
-    marker_iteration = [[1,1],[1,-1],[-1,-1],[-1,1]] # Keep original for reference if needed
-    marker_rects = []
-    for iterator_vectors in marker_iteration:
-                for vector in marker_vectors:
-                    pos = [grid_center_x_px + mm_to_px(iterator_vectors[0] * 193/2), grid_center_y_px + mm_to_px(iterator_vectors[1] * 278/2)]
-                    sorted_x = [pos[0],pos[0]+vector[0]]
-                    sorted_y = [pos[1],pos[1]+vector[1]]
-                    sorted_x.sort()
-                    sorted_y.sort()
-                    marker_rects.append([sorted_x[0], sorted_y[0], sorted_x[1], sorted_y[1]])
-    # --- Calculate Card Positions (in pixels) ---
-    card_positions_px = []
-
-    for row in range(3):
-        card_positions_px.append([])
-        for pos in range(3):
-            x = grid_x_offset_px +  pos * (card_width_px + spacing_px)
-            # Y calculation needs adjustment for pixel coordinates (0,0 is top-left in PIL)
-            # We want the bottom-left corner of the card to be at the calculated position
-            # The grid_y_offset_px is the distance from the bottom of the page to the bottom of the grid
-            # So, the y position for a card is page_height_px - (grid_y_offset_px + (row + 1) * card_height_px + row * spacing_px)
-            y = page_height_px - (grid_y_offset_px + (3 - row) * card_height_px + row * spacing_px)
-            card_positions_px[row].append([int(x), int(y)]) # Ensure pixel coordinates are integers
-    a4inpt = (img2pdf.mm_to_pt(210),img2pdf.mm_to_pt(297))
-    A4 = img2pdf.get_layout_fun(a4inpt)
-    """bg_box_per_card = []
-    for row in range(3):
-        bg_box_per_card.append([])
-        for pos in range(3):
-            x1 = card_positions_px[row][pos][0] - bg_box_margin_px
-            y1 = card_positions_px[row][pos][1] 
-            bg_box_per_card[row].append([int(x1), int(y1),int(x2),int(y2)],) # Ensure pixel coordinates are integers"""
-
-    # --- Determine image file extension ---
-    image_type = conf['image_type']
-    match image_type:
-        case 'small'|'normal'|'large'|'art_crop'|'border_crop':
-            image_format = 'jpg'
-        case 'png':
-            image_format = 'png'
-        case _:
-            logging.error(f"Unknown image type {image_type}")
-            raise Exception(f"Unknown image type {image_type}")
-
-    return {
-        'deck_size': 0,
-        'total_pages': 0,  # 9 cards per page
-        'card_width_px': card_width_px, # Keep mm values for reference
-        'card_height_px': card_height_px,
-        'spacing_mm': spacing_mm,
-        'bg_box': bg_box,
-        'page_width_px': page_width_px,
-        'page_height_px': page_height_px,
-        'marker_rects': marker_rects,
-        'card_positions_px': card_positions_px, # Store positions in pixels
-        'image_format': image_format,
-        'dpi': dpi, # Store DPI
-        'A4': A4,
-    }
-
 def merge_pages() -> None:
     """
     Merge all temporary page image files into a single PDF file using img2pdf.
@@ -942,85 +1018,6 @@ dpi:{conf['dpi']}
 """)
     config_file.close()
 
-def read_config():
-    keys = list(conf.keys())
-    conf_count = 0
-    conf_update_check = conf.copy()
-    conf_update_check.pop('bulk_json_path', None) # Use .pop with default to avoid KeyError
-    for a in conf_update_check.keys():
-        conf_update_check[a] = False
-    try:
-        with open("decklist_to_pdf.ini", "r") as file:
-            conf_count = 0
-            for line in file:
-                if not line.strip() or line.lstrip().startswith('#'):
-                    continue
-                parts = line.strip().split(':')
-                if len(parts) < 2: # Skip lines that don't have a key:value structure
-                    continue
-                key = parts[0].strip()
-                value = ':'.join(parts[1:]).strip() # Handle cases where value contains ':'
-
-                if key in keys:
-                    conf_count += 1
-                    if value == 'True':
-                        conf[key] = True
-                    elif value == 'False':
-                        conf[key] = False
-                    else:
-                        # --- check if the value is a number and convert it if true ---
-                        try:
-                            conf[key] = int(value)
-                        except ValueError:
-                            try:
-                                conf[key] = float(value)
-                            except ValueError:
-                                conf[key] = value # Keep as string if not int or float
-                    if key in conf_update_check: # Check if key exists before setting to True
-                        conf_update_check[key] = True
-        #conf["bulk_json_path"] = fetch_bulk_json() # Update bulk json path after reading config
-    except FileNotFoundError:
-        logging.error("decklist_to_pdf.ini inaccessable.")
-        # The function is only called if the file is detected something must be wrongw with premissions if you cant readit. 
-        raise Exception
-
-    # Write missing config entries
-    missing_configs = [config for config, found in conf_update_check.items() if not found]
-    if missing_configs:
-        logging.info(f"Writing missing configuration entries: {', '.join(missing_configs)}")
-        write_config(missing_configs)
-
-def init_config():
-    global conf
-    conf.update({
-        'decklist_path' : 'decklist.txt',
-        'two_sided': False,
-        'custom_backside': False,
-        'backside': 'back.png',
-        'pdf_path' : 'output.pdf',
-        'image_type' : 'png',
-        'spacing' : 0,
-        'mode' : 'default',
-        'gamma_correction' : True,
-        'reference_points' : True,
-        'stagger': True,
-        'x_axis_offset' : 0.75,
-        'user_agent': 'decklist_to_pdf/0.1',
-        'accept': 'application/json;q=0.9,*/*;q=0.8',
-        'worker_threads': 4,
-        'dpi': 600,
-        'bulk_json_path':''})
-    
-
-    if os.path.exists('decklist_to_pdf.ini'):
-        logging.info("Loading configuration from decklist_to_pdf.ini")
-        read_config()
-    else:
-        logging.info("decklist_to_pdf.ini not found, writing default configuration")
-        conf.update({'bulk_json_path':fetch_bulk_json(ask=False)}) # Fetch bulk json path and update config
-        write_config(list(conf.keys()))
-    
-    conf.update({'bulk_json_path':fetch_bulk_json(ask=True)}) # Fetch bulk json path and update config
 
 if __name__ == '__main__':
     # Set up logging

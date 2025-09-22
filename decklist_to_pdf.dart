@@ -123,6 +123,15 @@ Future<String> fetchBulkJson({bool ask = true}) async {
 
 Map<String, dynamic> loadCardDictionary(String filepath) {
   final file = File(filepath);
+  final parsedPath =
+      p.join(p.dirname(filepath), 'parsed_${p.basename(filepath)}');
+  final parsedFile = File(parsedPath);
+  if (parsedFile.existsSync()) {
+    // Load preparsed JSON
+    final data =
+        jsonDecode(parsedFile.readAsStringSync()) as Map<String, dynamic>;
+    return data;
+  }
   if (!file.existsSync()) throw Exception('Bulk json not found: $filepath');
   final data = jsonDecode(file.readAsStringSync()) as List<dynamic>;
   final map = <String, dynamic>{};
@@ -191,9 +200,11 @@ Map<String, dynamic> loadCardDictionary(String filepath) {
         'border_color': card['border_color']
       };
     } else if (layout != 'art_series') {
-      stderr.writeln("Unknown layout ${layout} for card ${card['name']}");
+      stderr.writeln("Unknown layout \\${layout} for card \\${card['name']}");
     }
   }
+  // Save preparsed JSON for future runs
+  parsedFile.writeAsStringSync(jsonEncode(map));
   return map;
 }
 
@@ -360,7 +371,6 @@ Future<void> fetchImage(
   }
 }
 
-// Gamma correction helper
 img.Image applyGammaCorrection(img.Image image, {double gamma = 2.2}) {
   final corrected = img.Image.from(image);
   for (int y = 0; y < corrected.height; y++) {
@@ -672,8 +682,6 @@ Future<Uint8List> renderPages(
   }
   return outPdf.save();
 }
-
-// mergePages removed — renderPages now returns complete PDF bytes
 
 void writeConfig(List<String> confList) {
   final file = File('decklist_to_pdf.ini');
