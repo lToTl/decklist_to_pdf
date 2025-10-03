@@ -329,8 +329,7 @@ void readDecklist(String filepath) {
   }
 }
 
-Future<void> fetchImage(
-    String imageUrl, String destination, String key, bool custom) async {
+Future<void> fetchImage(String imageUrl, String destination, String key, bool custom) async {
   // If imageUrl looks like local (custom), just open from disk
   if (custom) {
     final file = File(imageUrl);
@@ -554,8 +553,7 @@ Future<void> createImageCache() async {
   await Future.wait(workers);
 }
 
-Future<Uint8List> renderPages(
-    {String? decklistName, bool? twoSided, bool? stagger}) async {
+Future<Uint8List> renderPages({String? decklistName, bool? twoSided, bool? stagger}) async {
   await createImageCache();
   final cardsPerPage = 9;
   final totalPages =
