@@ -1,6 +1,6 @@
 # decklist_to_pdf
 Python script to generate printable pdf file from MTG decklist
-
+WIP dart version and flutter gui.
 Needs Python 3.10 or newer
 
 ---

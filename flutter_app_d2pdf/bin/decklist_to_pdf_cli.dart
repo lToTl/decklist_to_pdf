@@ -31,8 +31,9 @@ Future<void> main(List<String> args) async {
       if (val.isNotEmpty) core.conf['pdf_path'] = 'output/$val.pdf';
     } else if (arg.startsWith('--two-sided') || arg.startsWith('-t')) {
       final val = args[i].trim().toLowerCase();
-      if (val == 'true' || val == 'false')
+      if (val == 'true' || val == 'false') {
         core.conf['two_sided'] = val == 'true';
+      }
     } else if (arg.startsWith('--custom-backside=') || arg.startsWith('-c=')) {
       final val = args[i].trim().toLowerCase();
       if (val == 'true' || val == 'false') {
