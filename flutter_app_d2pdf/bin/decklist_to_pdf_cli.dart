@@ -101,7 +101,7 @@ Future<void> main(List<String> args) async {
     }
     if (decklistName.isNotEmpty && decklistName != core.conf['decklist_path']) {
       core.conf['decklist_path'] = 'input/\\$decklistName.txt';
-      core.writeConfig(['decklist_path']);
+      core.writeConfig();
     }
     final deckPath = p.join('input', '$decklistName.txt');
     if (File(deckPath).existsSync()) {

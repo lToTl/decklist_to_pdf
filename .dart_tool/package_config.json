@@ -147,6 +147,8 @@
     }
   ],
   "generator": "pub",
-  "generatorVersion": "3.9.3",
+  "generatorVersion": "3.9.2",
+  "flutterRoot": "file:///home/slighteye/.asdf/installs/flutter/3.35.3-stable",
+  "flutterVersion": "3.35.4",
   "pubCache": "file:///home/slighteye/.pub-cache"
 }

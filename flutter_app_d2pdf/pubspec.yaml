@@ -36,11 +36,13 @@ dependencies:
   provider: ^6.1.5
   http: ^1.1.0
   path: ^1.8.3
-  path_provider: ^2.0.15
+  path_provider: ^2.1.5
   image: ^4.0.17
   pdf: ^3.11.0
   printing: ^5.11.0 
   cupertino_icons: ^1.0.8
+  file_picker: ^10.3.3
+  super_clipboard: ^0.9.1
 
 dev_dependencies:
   flutter_test:
