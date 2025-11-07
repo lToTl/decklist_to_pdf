@@ -8,7 +8,6 @@ from urllib.request import urlretrieve, Request
 # Removed reportlab imports: from reportlab.lib.utils import ImageReader
 from PyPDF2 import PdfMerger#, PdfReader
 from PIL import Image, ImageEnhance, ImageDraw
-import time
 import requests
 import logging
 import orjson
