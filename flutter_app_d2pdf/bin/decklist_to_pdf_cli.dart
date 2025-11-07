@@ -12,7 +12,7 @@ Future<void> main(List<String> args) async {
   // Ensure scryfall directory exists and fetch bulk json
   await core.fetchBulkJson(ask: false);
   final bulkPath = core.conf['bulk_json_path'] as String;
-  core.cardData.addAll(await core.loadCardDictionary(bulkPath));
+  core.cardData.addAll(core.loadCardDictionary(bulkPath));
 
   // Add image format
   core.consts['image_format'] = 'png';

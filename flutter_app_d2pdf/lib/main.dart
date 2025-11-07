@@ -13,8 +13,8 @@ import 'package:image/image.dart' as img;
 import 'decklist_to_pdf.dart';
 import 'package:path_provider/path_provider.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+void main() {
+  //WidgetsFlutterBinding.ensureInitialized();
   // Set system UI overlay styles
   SystemChrome.setSystemUIOverlayStyle(
     SystemUiOverlayStyle(

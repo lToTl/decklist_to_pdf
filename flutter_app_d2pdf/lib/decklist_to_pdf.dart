@@ -12,7 +12,7 @@ import 'package:image/image.dart' as img;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart' as pdf;
 import 'package:path/path.dart' as p;
-import 'data_service.dart';
+//import 'data_service.dart';
 //import 'package:hive/hive.dart' as hive;
 
 class DecklistToPdfCore {
@@ -152,7 +152,7 @@ class DecklistToPdfCore {
       await fetchBulkJson(ask: false);
     }
     final bulkPath = conf['bulk_json_path'] as String;
-    cardData.addAll(await loadCardDictionary(bulkPath));
+    cardData.addAll(loadCardDictionary(bulkPath));
   }
 
   Future<String> fetchBulkJson({bool ask = true}) async {
@@ -183,12 +183,12 @@ class DecklistToPdfCore {
     return local;
   }
 
-  Future<Map<String, dynamic>> loadCardDictionary(String filepath) async {
+  Map<String, dynamic> loadCardDictionary(String filepath) {
     final file = File(filepath);
 
-    final CardDataService cardData =
-        CardDataService.initializeAndLoadData(conf['bulk_json_path'] as String)
-            as CardDataService;
+    //final CardDataService cardData =
+    //    CardDataService.initializeAndLoadData(conf['bulk_json_path'] as String)
+    //        as CardDataService;
     final parsedPath = p.join(
       p.dirname(filepath),
       'parsed_${p.basename(filepath)}',
