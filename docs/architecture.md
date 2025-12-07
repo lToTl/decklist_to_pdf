@@ -4,6 +4,9 @@ This document describes the architecture and design of the Decklist to PDF proje
 
 ## 🏗️ System Architecture
 
+> [!IMPORTANT]
+> **Code Duplication Notice**: The core logic is **duplicated** across implementations, not shared. Each implementation maintains its own copy of the PDF generation logic.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         User Interface                          │
@@ -14,23 +17,60 @@ This document describes the architecture and design of the Decklist to PDF proje
 └────────┬─────────┴────────┬─────────┴─────────────┬─────────────┘
          │                  │                       │
          ▼                  ▼                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        Core Logic                               │
-│  • Configuration Management                                     │
-│  • Scryfall Data Loading                                        │
-│  • Decklist Parsing                                             │
-│  • Image Fetching & Caching                                     │
-│  • PDF Rendering                                                │
-└─────────────────────────────────┬───────────────────────────────┘
-                                  │
-         ┌────────────────────────┼────────────────────────────┐
-         ▼                        ▼                            ▼
-┌─────────────────┐    ┌─────────────────────┐    ┌────────────────────┐
-│   Scryfall API  │    │   Local File System │    │   Output Files     │
-│   • Bulk Data   │    │   • image_cache/    │    │   • output/*.pdf   │
-│   • Card Images │    │   • custom_cards/   │    │                    │
-└─────────────────┘    │   • cardbacks/      │    └────────────────────┘
-                       └─────────────────────┘
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────────┐
+│  Python Core    │ │   Dart Core     │ │     Flutter Core        │
+│  (standalone)   │ │  (standalone)   │ │  (separate copy)        │
+│                 │ │                 │ │                         │
+│ • PIL/Pillow    │ │ • package:image │ │ • package:image         │
+│ • img2pdf       │ │ • package:pdf   │ │ • package:pdf           │
+│ • PyPDF2        │ │                 │ │ • package:printing      │
+│ • ThreadPool    │ │ • async/await   │ │ • Hive for data         │
+└────────┬────────┘ └────────┬────────┘ └────────────┬────────────┘
+         │                   │                       │
+         └───────────────────┼───────────────────────┘
+                             ▼
+         ┌────────────────────────────────────────────────────┐
+         │                 Shared Resources                   │
+         ├────────────────────────────────────────────────────┤
+         │  • Scryfall API (card data, images)                │
+         │  • Local file system (cache, config, output)       │
+         │  • decklist_to_pdf.ini (configuration file)        │
+         └────────────────────────────────────────────────────┘
+```
+
+## 🔀 Implementation Comparison
+
+| Aspect | Python | Dart CLI | Flutter App |
+|--------|--------|----------|-------------|
+| **File** | `decklist_to_pdf.py` | `decklist_to_pdf.dart` | `lib/decklist_to_pdf.dart` |
+| **Structure** | Top-level functions | Top-level functions | `DecklistToPdfCore` class |
+| **Concurrency** | `ThreadPoolExecutor` | `async/await` + `Future.wait` | `async/await` |
+| **Image lib** | PIL/Pillow | package:image | package:image |
+| **PDF lib** | img2pdf + PyPDF2 | package:pdf | package:pdf + printing |
+| **Data storage** | JSON files | JSON files | Hive (binary) |
+| **Shared with** | None | None | None |
+
+### Why Duplicated?
+
+1. **Language barrier**: Python logic cannot be directly shared with Dart
+2. **Historical**: Dart CLI was ported from Python, Flutter app was created separately
+3. **Different dependencies**: Each uses language-specific libraries
+
+### Potential Future Improvement
+
+The Dart CLI and Flutter app could share a common Dart package:
+
+```
+Proposed Structure:
+├── packages/
+│   └── decklist_core/           # Shared Dart package
+│       ├── lib/
+│       │   └── decklist_core.dart
+│       └── pubspec.yaml
+├── decklist_to_pdf.dart         # CLI imports decklist_core
+└── flutter_app_d2pdf/
+    └── lib/
+        └── main.dart            # Flutter imports decklist_core
 ```
 
 ## 📦 Component Overview
