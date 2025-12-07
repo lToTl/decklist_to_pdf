@@ -11,8 +11,6 @@ Future<void> main(List<String> args) async {
   var core = DecklistToPdfCore();
   // Ensure scryfall directory exists and fetch bulk json
   await core.fetchBulkJson(ask: false);
-  final bulkPath = core.conf['bulk_json_path'] as String;
-  core.cardData.addAll(core.loadCardDictionary(bulkPath));
 
   // Add image format
   core.consts['image_format'] = 'png';

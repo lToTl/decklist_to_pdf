@@ -5,6 +5,94 @@ import 'package:hive/hive.dart';
 
 part 'card_data_model.g.dart';
 
+@HiveType(typeId: 5) // Unique Type ID for Deck Model
+class Deck extends HiveObject {
+  @HiveField(0)
+  final object = 'deck'; // Object type
+  @HiveField(1)
+  final String name; // Name of the deck
+  @HiveField(2)
+  final String description = ''; // Description of the deck
+  @HiveField(3)
+  final Map<String, int> cards = {}; // List of card appKeys in the deck
+  @HiveField(4)
+  final Map<String, Tag> tags = {}; // Map of tag names to Tag objects associated with the deck
+  // Constructor to create the Deck object after importing from menu
+  Deck({required this.name});
+  // Method to add a card to the deck
+  void addCard(String appKey, {int quantity = 1}) {
+    cards.update(appKey, (value) => value + quantity, ifAbsent: () => quantity);
+  }
+
+  // Method to add a tag to the deck
+  void addTag(Tag tag) {
+    tags[tag.name] = tag;
+  }
+
+  // Method to remove a tag from the deck
+  void removeTag(String tagName) {
+    tags.remove(tagName);
+  }
+
+  // factory method to create a Deck from menu input
+  factory Deck.fromInput(String name) {
+    return Deck(name: name);
+  }
+
+  // Method to remove cards in selection from the deck
+  void removeCards(List<String> appKeys) {
+    cards.removeWhere((key, value) => appKeys.contains(key));
+  }
+
+  // Method to remove a card from the deck
+  void removeCard(String appKey) {
+    cards.remove(appKey);
+  }
+
+  // Method to clear all cards from the deck
+  void clearDeck() {
+    cards.clear();
+  }
+
+  // Method to clear all tags from the deck
+  void clearTags() {
+    tags.clear();
+  }
+
+  // Method to get the number of cards in the deck
+  int getCardCount() {
+    return cards.length;
+  }
+
+  // Method to get the number of tags in the deck
+  int getTagCount() {
+    return tags.length;
+  }
+}
+
+@HiveType(typeId: 4) // Unique Type ID for Tag Model
+class Tag extends HiveObject {
+  @HiveField(0)
+  final String name; // Name of the tag
+  @HiveField(1)
+  final String color; // Color associated with the tag
+  @HiveField(2)
+  final String object = 'tag'; // Object type
+  @HiveField(3)
+  final Map<String, int> taggedCardsStatus = {}; // Map of card appKeys to their status under this tag
+
+  // Constructor to create the Tag object after parsing the JSON
+  Tag({required this.name, required this.color});
+  // Factory method to create a Tag from menu input
+  factory Tag.fromInput(String name, String color) {
+    return Tag(name: name, color: color);
+  }
+  // Method to add or update a card's status under this tag
+  void addOrUpdateCardStatus(String appKey, int status) {
+    taggedCardsStatus[appKey] = status;
+  }
+}
+
 @HiveType(typeId: 3) // Unique Type ID for Set Model
 class Set extends HiveObject {
   @HiveField(0)
@@ -247,7 +335,7 @@ class CardModel extends HiveObject {
   @HiveField(30)
   final List<String> artistsIds; // Artist IDs of the card print
   @HiveField(31)
-  final List<int> attractionLights; // Attraction lights for the card print
+  final List<bool> attractionLights; // Attraction lights for the card print
   @HiveField(32)
   final bool booster; // Whether the card is in boosters
   @HiveField(33)
@@ -441,6 +529,15 @@ class CardModel extends HiveObject {
       6: 'heart',
     };
     String tAppKey = '${json['set']}_${json['collector_number']}';
+    List aLights = json['attraction_lights'] != null
+        ? (json['attraction_lights'] as List).cast<int>()
+        : [];
+    List<bool> aLightsBool = [
+      aLights.contains(2),
+      aLights.contains(3),
+      aLights.contains(4),
+      aLights.contains(5),
+    ];
     return CardModel(
       id: json['id'] as String,
       allParts: json['all_parts'] != null
@@ -555,9 +652,7 @@ class CardModel extends HiveObject {
       artistsIds: json['artist_ids'] != null
           ? (json['artist_ids'] as List).cast<String>()
           : [],
-      attractionLights: json['attraction_lights'] != null
-          ? (json['attraction_lights'] as List).cast<int>()
-          : [],
+      attractionLights: aLightsBool,
       lifeModifier: json['life_modifier'] as int? ?? 0,
       loyalty: json['loyalty'] != null ? json['loyalty'] as String : '',
       borderColor: json['border_color'] as String,

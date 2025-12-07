@@ -2,6 +2,7 @@
 
 import 'dart:convert';
 import 'dart:core';
+//import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:math' as math;
@@ -17,7 +18,6 @@ import 'data_service.dart';
 
 class DecklistToPdfCore {
   final Map<String, dynamic> conf = {};
-  final Map<String, dynamic> cardData = {};
   final List<Map<String, dynamic>> decklist = [];
   final Map<String, img.Image> imageCache = {};
   late final Map<String, dynamic> consts;
@@ -25,7 +25,20 @@ class DecklistToPdfCore {
   DecklistToPdfCore({Map<String, dynamic>? overrideConfig}) {
     initConfig(overrideConfig: overrideConfig);
     setupWorkspace();
+    setupDatabase();
   }
+
+  int getColor(int r, int g, int b, int a) {
+    return ((a & 0xFF) << 24) |
+        ((r & 0xFF) << 16) |
+        ((g & 0xFF) << 8) |
+        ((b & 0xFF));
+  }
+
+  int getRed(int c) => (c >> 16) & 0xFF;
+  int getGreen(int c) => (c >> 8) & 0xFF;
+  int getBlue(int c) => c & 0xFF;
+  int getAlpha(int c) => (c >> 24) & 0xFF;
 
   void setupWorkspace() {
     // Create necessary folders from Run.sh
@@ -67,18 +80,6 @@ class DecklistToPdfCore {
       decklistFile.writeAsStringSync(defaultDecklist);
     }
   }
-
-  int getColor(int r, int g, int b, int a) {
-    return ((a & 0xFF) << 24) |
-        ((r & 0xFF) << 16) |
-        ((g & 0xFF) << 8) |
-        ((b & 0xFF));
-  }
-
-  int getRed(int c) => (c >> 16) & 0xFF;
-  int getGreen(int c) => (c >> 8) & 0xFF;
-  int getBlue(int c) => c & 0xFF;
-  int getAlpha(int c) => (c >> 24) & 0xFF;
 
   void initConfig({Map<String, dynamic>? overrideConfig}) {
     conf.addAll({
@@ -149,11 +150,23 @@ class DecklistToPdfCore {
 
   Future<void> initialize({bool fetchBulk = true}) async {
     readConfig();
+    // set a flag to let data service know to wate until json download is done
+
     if (fetchBulk) {
       await fetchBulkJson(ask: false);
     }
-    final bulkPath = conf['bulk_json_path'] as String;
-    cardData.addAll(loadCardDictionary(bulkPath));
+    // final bulkPath = conf['bulk_json_path'] as String;
+    // cardData.addAll(loadCardDictionary(bulkPath));
+  }
+
+  void setupDatabase() {
+    List releaseSchedule = [];
+    //Future<void>.sync(() async {
+    //  await
+    CardDataService.initializeAndLoadData(
+      conf['bulk_json_path'] as String,
+      releaseSchedule,
+    );
   }
 
   Future<String> fetchBulkJson({bool ask = true}) async {
@@ -187,9 +200,6 @@ class DecklistToPdfCore {
   Map<String, dynamic> loadCardDictionary(String filepath) {
     final file = File(filepath);
 
-    final CardDataService cardData =
-        CardDataService.initializeAndLoadData(conf['bulk_json_path'] as String)
-            as CardDataService;
     final parsedPath = p.join(
       p.dirname(filepath),
       'parsed_${p.basename(filepath)}',
@@ -295,10 +305,12 @@ class DecklistToPdfCore {
     final parts = line.trim().split(RegExp(r'\s+'));
     final last = parts.last;
     final key = '$setSymbol-$last';
-    if (!cardData.containsKey(key)) {
-      throw Exception('Card $line not found in card data.');
+    dynamic data = {};
+    try {
+      data = CardDataService.getCardByKey(key) as Map<String, dynamic>;
+    } catch (e) {
+      throw Exception('Card not found for key $key in line: $decklistLine');
     }
-    final data = cardData[key] as Map<String, dynamic>;
     return {
       'name': line.substring(0, start - 1),
       'key': (forceSide == 0 ? key : '${key}_${forceSide == 1 ? 'A' : 'B'}'),
@@ -451,27 +463,52 @@ class DecklistToPdfCore {
     };
   }
 
-  Future<void> fetchGUIImage(String key, bool custom) async {
-    if (custom) {
-      final imageUrl = 'custom_cards/$key.png';
-      final destination = imageUrl;
-      await fetchImage(imageUrl, destination, key, custom);
+  // network fetch with simple caching
+  void fetchImageForCard(
+    Map<String, dynamic> card, {
+    bool preview = false,
+  }) async {
+    final key = card['key'] as String;
+    if (imageCache.containsKey(key)) {
       return;
     }
-    final destination = 'image_cache/normal/jpg/$key.jpg';
-    final imageUrl =
-        'https://api.scryfall.com/cards/${key.replaceAll('_', '/')}/normal';
-    await fetchImage(imageUrl, destination, key, custom);
+    if (card['faces'] != null && card['faces'] is List) {
+      // two sided card
+      for (final side in (card['faces'] as List).cast<Map<String, dynamic>>()) {
+        fetchImageForCard(side, preview: preview);
+      }
+      return;
+    }
+    final imageUrisMap = card['image_uris'] as Map<String, dynamic>?;
+    if (imageUrisMap == null) {
+      stderr.writeln('No image_uris found for key $key');
+      return;
+    }
+    final destination = p.join(
+      'image_cache',
+      conf['image_type'] as String,
+      preview ? 'jpg' : 'png',
+      '$key.${consts['image_format'] ?? 'png'}',
+    );
+    try {
+      await fetchImage(
+        imageUrisMap[conf['image_type']] as String,
+        destination,
+        key,
+        card['custom'] == true,
+        preview,
+      );
+    } catch (e) {
+      stderr.writeln('Failed to fetch image for key $key: $e');
+    }
   }
 
-  // network fetch with simple caching
   Future<void> fetchImage(
     String imageUrl,
     String destination,
     String key,
     bool custom,
-    //optional preview parameter to fetch lower res image for preview mode
-    //{bool preview = false,}
+    bool preview,
   ) async {
     // If imageUrl looks like local (custom), just open from disk
     if (custom) {
@@ -487,7 +524,8 @@ class DecklistToPdfCore {
     }
 
     // network fetch with simple caching
-    final destFile = File(destination);
+
+    final destFile = File('$destination${preview ? '_preview' : ''}');
     await Directory(p.dirname(destination)).create(recursive: true);
     if (!destFile.existsSync()) {
       final res = await http.get(
@@ -603,7 +641,7 @@ class DecklistToPdfCore {
         try {
           if (File(destination).existsSync()) {
             stderr.writeln('Image already cached for $key -> $destination');
-            await fetchImage(destination, destination, key, false);
+            await fetchImage(destination, destination, key, false, false);
             continue;
           }
         } catch (e) {
@@ -613,7 +651,7 @@ class DecklistToPdfCore {
         if (side['custom'] == true) {
           final local = 'custom_cards/${side['name']}.png';
           try {
-            await fetchImage(local, local, key, true);
+            await fetchImage(local, local, key, true, false);
           } catch (e) {
             stderr.writeln('Failed to load custom image for $key: $e');
           }
@@ -634,7 +672,7 @@ class DecklistToPdfCore {
           if (uri == null || uri.isEmpty) continue;
           try {
             stderr.writeln('Trying $t image for key $key -> $uri');
-            await fetchImage(uri, destination, key, false);
+            await fetchImage(uri, destination, key, false, false);
             downloaded = true;
             break;
           } catch (e) {
@@ -915,5 +953,7 @@ class DecklistToPdfCore {
     }
   }
 
-  // Library file: all CLI logic has been removed. Use the exported functions and variables in your application or CLI entrypoint.
+  // Deck manager functions go here
+  void addTagToCard(String cardKey, String tagId) {}
+  // Implementation for adding a tag to a card
 }

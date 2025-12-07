@@ -329,7 +329,7 @@ class CardModelAdapter extends TypeAdapter<CardModel> {
       flavorText: fields[38] as String,
       artist: fields[29] as String,
       artistsIds: (fields[30] as List).cast<String>(),
-      attractionLights: (fields[31] as List).cast<int>(),
+      attractionLights: (fields[31] as List).cast<bool>(),
       borderColor: fields[33] as String,
       cardBackId: fields[34] as String,
       frameEffects: (fields[39] as List).cast<String>(),

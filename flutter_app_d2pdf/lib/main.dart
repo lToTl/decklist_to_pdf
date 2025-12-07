@@ -69,11 +69,11 @@ class MyAppState extends ChangeNotifier {
 
   void addCard(Map<String, dynamic> item, int index) {
     core.decklist.insert(index, item);
-    core.fetchGUIImage(item['id'] as String, item['custom']);
+    core.fetchImageForCard(item, preview: false);
     notifyListeners();
   }
 
-  void removeCard(int index) {
+  void removeCardAtIndex(int index) {
     core.decklist.removeAt(index);
     notifyListeners();
   }
