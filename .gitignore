@@ -171,7 +171,6 @@ cython_debug/
 test.pdf
 /scryfall_bulk_json
 /output
-requirements.txt
 /image_cache
 decklist_to_pdf.ini
 decklist.txt

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+# Virtual environment
+.venv/
+venv/
+ENV/
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+# Project-specific generated files
+decklist_to_pdf.ini
+scryfall_bulk_json/
+image_cache/
+output/
+input/
+custom_cards/
+cardbacks/
+# Keep directory structure but ignore contents
+!custom_cards/.gitkeep
+!cardbacks/.gitkeep
+!input/.gitkeep
+!output/.gitkeep
+# OS
+.DS_Store
+Thumbs.db
