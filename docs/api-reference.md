@@ -87,17 +87,43 @@ class DecklistToPdfCore {
 | `clearDeck()` | Clear all cards |
 | `setDeck(path)` | Load decklist from file |
 | `addCopy(index)` | Duplicate card |
-| `addCard(item, index)` | Insert card |
-| `removeCard(index)` | Remove card |
+| `addCard(item, index)` | Insert card (triggers image fetch) |
+| `removeCardAtIndex(index)` | Remove card at index |
 | `moveCard(old, new)` | Reorder card |
 | `updateConfig(key, val)` | Update setting |
+
+### DecklistToPdfCore (Flutter)
+
+| Method | Description |
+|--------|-------------|
+| `setupDatabase()` | Initialize Hive database |
+| `fetchImageForCard(card, {preview})` | Fetch image for card (handles two-sided) |
+| `fetchImage(url, dest, key, custom, preview)` | Download/cache single image |
+| `addTagToCard(cardKey, tagId)` | Add tag to a card |
 
 ### CardDataService
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `initializeAndLoadData(path)` | `Future<void>` | Initialize Hive |
-| `getAllCards()` | `Future<List<CardModel>>` | Get all cards |
+| `initializeAndLoadData(path, schedule)` | `Future<void>` | Initialize Hive with release schedule |
+| `getCardByKey(key)` | `CardModel?` | Get card by appKey (set_collectorNumber) |
+| `loadCards()` | `Future` | Load all cards from Hive |
+
+### Deck Model
+
+| Method | Description |
+|--------|-------------|
+| `addCard(appKey, {quantity})` | Add card to deck |
+| `removeCard(appKey)` | Remove card from deck |
+| `addTag(tag)` | Add tag to deck |
+| `removeTag(tagName)` | Remove tag from deck |
+| `clearDeck()` | Clear all cards |
+
+### Tag Model
+
+| Method | Description |
+|--------|-------------|
+| `addOrUpdateCardStatus(appKey, status)` | Set card status under tag |
 
 ---
 

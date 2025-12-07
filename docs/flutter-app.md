@@ -196,15 +196,19 @@ class _PagePainter extends CustomPainter {
 
 ## 💾 Data Layer
 
-### CardModel (Hive Model)
+### Data Models (Hive)
 
-Data model for Scryfall card data:
+The Flutter app uses Hive for fast binary data storage. Models are defined in `card_data_model.dart`:
+
+#### CardModel
+
+Core card data from Scryfall:
 
 ```dart
 @HiveType(typeId: 0)
 class CardModel extends HiveObject {
   @HiveField(0)
-  late String id;
+  late String id;           // Scryfall UUID
   
   @HiveField(1)
   late String name;
@@ -212,7 +216,49 @@ class CardModel extends HiveObject {
   @HiveField(2)
   Map<String, String>? imageUris;
   
-  // ... more fields
+  @HiveField(3)
+  late String set;
+  
+  @HiveField(4)
+  late String collectorNumber;
+  
+  late String appKey;       // "set_collectorNumber" for lookups
+  // ... 30+ additional fields
+}
+```
+
+#### Deck Model (New)
+
+Manages user deck collections:
+
+```dart
+@HiveType(typeId: 5)
+class Deck extends HiveObject {
+  final String name;
+  final String description;
+  final Map<String, int> cards;      // appKey -> quantity
+  final Map<String, Tag> tags;       // tag name -> Tag
+  
+  void addCard(String appKey, {int quantity = 1});
+  void removeCard(String appKey);
+  void addTag(Tag tag);
+  void removeTag(String tagName);
+  void clearDeck();
+}
+```
+
+#### Tag Model (New)
+
+For organizing cards within decks:
+
+```dart
+@HiveType(typeId: 4)
+class Tag extends HiveObject {
+  final String name;
+  final String color;
+  final Map<String, int> taggedCardsStatus;  // appKey -> status
+  
+  void addOrUpdateCardStatus(String appKey, int status);
 }
 ```
 
@@ -222,16 +268,19 @@ Service for loading and querying card data:
 
 ```dart
 class CardDataService {
-  static Future<void> initializeAndLoadData(String assetPath) async {
-    await Hive.initFlutter();
-    Hive.registerAdapter(CardModelAdapter());
-    // Parse JSON and save to Hive (one-time)
-  }
+  static Box<CardModel> cardBox;  // Global Hive box reference
   
-  static Future<List<CardModel>> getAllCards() async {
-    final box = await Hive.openBox<CardModel>(_kCardBox);
-    return box.values.toList();
-  }
+  // Initialize Hive and load card data (one-time slow, then fast)
+  static Future<void> initializeAndLoadData(
+    String rawJsonAssetPath,
+    List releaseSchedule,
+  ) async;
+  
+  // Get card by set-collectorNumber key
+  static CardModel? getCardByKey(String key);
+  
+  // Load all cards from Hive
+  static Future loadCards() async;
 }
 ```
 
@@ -247,7 +296,7 @@ First Launch (Slow):
                                   ▼
                          ┌──────────────────┐
                          │  Save to Hive    │
-                         │  (binary format) │
+                         │  keyed by appKey │
                          └──────────────────┘
 
 Subsequent Launches (Fast):
