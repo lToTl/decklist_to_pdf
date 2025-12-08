@@ -114,7 +114,9 @@ def _parse_value(value: str):
 
 def write_config(config: Config, keys: list[str], config_path: str = 'decklist_to_pdf.ini') -> None:
     """
-    Write or append configuration entries to INI file.
+    Write or update configuration entries in INI file.
+    
+    Updates existing keys in place, appends new keys at the end.
     
     Args:
         config: Config object with current values
@@ -149,8 +151,43 @@ def write_config(config: Config, keys: list[str], config_path: str = 'decklist_t
         'dpi': '# pixel density for printing',
     }
     
-    with open(config_path, 'a', encoding='utf-8') as file:
-        for key in keys:
-            if key in config_dict:
-                comment = config_comments.get(key, '')
-                file.write(f"\n{comment}\n{key}:{config_dict[key]}\n")
+    keys_to_write = set(keys) & set(config_dict.keys())
+    if not keys_to_write:
+        return
+    
+    # Read existing file content
+    existing_lines = []
+    existing_keys = set()
+    if os.path.exists(config_path):
+        with open(config_path, 'r', encoding='utf-8') as file:
+            existing_lines = file.readlines()
+        
+        # Find which keys already exist in the file
+        for line in existing_lines:
+            if line.strip() and not line.lstrip().startswith('#'):
+                parts = line.strip().split(':')
+                if len(parts) >= 2:
+                    existing_keys.add(parts[0].strip())
+    
+    # Update existing keys in place
+    updated_lines = []
+    for line in existing_lines:
+        if line.strip() and not line.lstrip().startswith('#'):
+            parts = line.strip().split(':')
+            if len(parts) >= 2:
+                key = parts[0].strip()
+                if key in keys_to_write and key in existing_keys:
+                    # Update this line with new value
+                    updated_lines.append(f"{key}:{config_dict[key]}\n")
+                    continue
+        updated_lines.append(line)
+    
+    # Append new keys that don't exist yet
+    new_keys = keys_to_write - existing_keys
+    for key in new_keys:
+        comment = config_comments.get(key, '')
+        updated_lines.append(f"\n{comment}\n{key}:{config_dict[key]}\n")
+    
+    # Write back the file
+    with open(config_path, 'w', encoding='utf-8') as file:
+        file.writelines(updated_lines)
