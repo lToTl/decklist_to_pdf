@@ -79,7 +79,7 @@ class ImageProcessor:
                         source = f"custom_cards/{side['name']}.png"
                         dest = f"custom_cards/{side['name']}.{self.image_format}"
                         futures.append(executor.submit(
-                            self._fetch_image, source, dest, key, is_custom=True
+                            self._fetch_image, source, dest, key, is_custom=True, black_bordered=False
                         ))
                     else:
                         # Scryfall card
@@ -91,7 +91,7 @@ class ImageProcessor:
                             sleep(RATE_LIMIT_DELAY)
                         
                         futures.append(executor.submit(
-                            self._fetch_image, image_uri, dest, key, is_custom=False
+                            self._fetch_image, image_uri, dest, key, is_custom=False, black_bordered=side.get('black_bordered', False)
                         ))
             
             # Handle custom backside
@@ -99,7 +99,7 @@ class ImageProcessor:
                 backside_path = f"cardbacks/{self.config.backside}"
                 if os.path.exists(backside_path):
                     futures.append(executor.submit(
-                        self._fetch_image, backside_path, backside_path, "back", is_custom=True
+                        self._fetch_image, backside_path, backside_path, "back", is_custom=True, black_bordered=False
                     ))
             
             # Wait for all downloads to complete
@@ -127,7 +127,7 @@ class ImageProcessor:
         os.makedirs(f"custom_cards/{dpi}", exist_ok=True)
         os.makedirs(f"cardbacks/{dpi}", exist_ok=True)
     
-    def _fetch_image(self, source: str, destination: str, key: str, is_custom: bool) -> None:
+    def _fetch_image(self, source: str, destination: str, key: str, is_custom: bool, black_bordered: bool) -> None:
         """
         Fetch, process, and cache an image.
         
@@ -157,11 +157,11 @@ class ImageProcessor:
             return
         
         # Standard cards: check cache hierarchy
-        if os.path.exists(gc_path) and self.config.gamma_correction:
+        if os.path.exists(gc_path) and self.config.gamma_correction and black_bordered:
             img = self._open_image(gc_path, retries)
         elif os.path.exists(dpi_destination):
             img = self._open_image(dpi_destination, retries)
-            if self.config.gamma_correction:
+            if self.config.gamma_correction and black_bordered:
                 img = self._apply_gamma_correction(img, gc_path, retries)
         elif os.path.exists(destination):
             img = self._open_image(destination, retries)
@@ -171,7 +171,7 @@ class ImageProcessor:
         else:
             img = self._download_image(source, destination, retries)
             img = self._resize_image(img, dpi_destination)
-            if self.config.gamma_correction:
+            if self.config.gamma_correction and black_bordered:
                 img = self._apply_gamma_correction(img, gc_path, retries)
         
         self.image_cache[key] = img
