@@ -11,10 +11,11 @@ import 'package:super_clipboard/super_clipboard.dart';
 import 'package:image/image.dart' as img;
 
 import 'decklist_to_pdf.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 void main() {
-  //WidgetsFlutterBinding.ensureInitialized();
+  WidgetsFlutterBinding.ensureInitialized();
   // Set system UI overlay styles
   SystemChrome.setSystemUIOverlayStyle(
     SystemUiOverlayStyle(
@@ -50,6 +51,17 @@ class MyApp extends StatelessWidget {
 
 class MyAppState extends ChangeNotifier {
   var core = DecklistToPdfCore();
+
+  MyAppState() {
+    _init();
+  }
+
+  Future<void> _init() async {
+    final appDir = await getApplicationSupportDirectory();
+    final hivePath = p.join(appDir.path, 'hive_db');
+    await core.initialize(hivePath: hivePath);
+    notifyListeners();
+  }
 
   void clearDeck() {
     core.readDecklist(core.conf['decklist_path']!);

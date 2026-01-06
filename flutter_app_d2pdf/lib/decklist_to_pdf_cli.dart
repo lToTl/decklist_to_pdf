@@ -9,8 +9,8 @@ Future<void> main(List<String> args) async {
   stderr.writeln('Starting decklist_to_pdf in Dart');
   // Instantiate core components
   var core = DecklistToPdfCore();
-  // Ensure scryfall directory exists and fetch bulk json
-  await core.fetchBulkJson(ask: false);
+  // Ensure scryfall directory exists, fetch bulk json, and setup database
+  await core.initialize();
 
   // Add image format
   core.consts['image_format'] = 'png';

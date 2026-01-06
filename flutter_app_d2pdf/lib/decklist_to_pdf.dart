@@ -25,7 +25,6 @@ class DecklistToPdfCore {
   DecklistToPdfCore({Map<String, dynamic>? overrideConfig}) {
     initConfig(overrideConfig: overrideConfig);
     setupWorkspace();
-    setupDatabase();
   }
 
   int getColor(int r, int g, int b, int a) {
@@ -48,6 +47,7 @@ class DecklistToPdfCore {
       'custom_cards',
       'image_cache/small',
       'image_cache/normal',
+      'hive_db',
       'image_cache/large',
       'image_cache/png',
       'image_cache/art_crop',
@@ -63,7 +63,7 @@ class DecklistToPdfCore {
     final decklistPath = conf['decklist_path'] as String;
     final decklistFile = File(decklistPath);
     if (!decklistFile.existsSync()) {
-      const defaultDecklist = '''
+      const exampleDecklist = '''
 1 Yahenni, Undying Partisan (CMM) 201
 1 Accursed Marauder (MH3) 80
 1 Animate Dead (MKC) 125
@@ -77,7 +77,7 @@ class DecklistToPdfCore {
 1 Deathgreeter (DDD) 33
 1 Death's-Head Buzzard (VMA) 115
 ''';
-      decklistFile.writeAsStringSync(defaultDecklist);
+      decklistFile.writeAsStringSync(exampleDecklist);
     }
   }
 
@@ -148,24 +148,25 @@ class DecklistToPdfCore {
     }
   }
 
-  Future<void> initialize({bool fetchBulk = true}) async {
+  Future<void> initialize({bool fetchBulk = true, String? hivePath}) async {
     readConfig();
     // set a flag to let data service know to wate until json download is done
 
     if (fetchBulk) {
       await fetchBulkJson(ask: false);
     }
+    await setupDatabase(hivePath: hivePath);
     // final bulkPath = conf['bulk_json_path'] as String;
     // cardData.addAll(loadCardDictionary(bulkPath));
   }
 
-  void setupDatabase() {
+  Future<void> setupDatabase({String? hivePath}) async {
     List releaseSchedule = [];
-    //Future<void>.sync(() async {
-    //  await
-    CardDataService.initializeAndLoadData(
+    final finalHivePath = hivePath ?? p.join(Directory.current.path, 'hive_db');
+    await CardDataService.initializeAndLoadData(
       conf['bulk_json_path'] as String,
       releaseSchedule,
+      hivePath: finalHivePath,
     );
   }
 

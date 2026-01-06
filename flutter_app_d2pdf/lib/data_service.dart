@@ -5,7 +5,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'card_data_model.dart';
 
 const String _kCardBox = 'scryfall_cards_box';
-Box<CardModel> cardBox = Hive.box<CardModel>(_kCardBox);
+late Box<CardModel> cardBox;
 
 class CardDataService {
   static bool isScryfallDownloadComplete = false;
@@ -14,10 +14,15 @@ class CardDataService {
 
   static Future<void> initializeAndLoadData(
     String rawJsonAssetPath,
-    List releaseSchedule,
-  ) async {
+    List releaseSchedule, {
+    String? hivePath,
+  }) async {
     // 1. Initialize Hive
-    await Hive.initFlutter();
+    if (hivePath != null) {
+      Hive.init(hivePath);
+    } else {
+      await Hive.initFlutter();
+    }
 
     // 2. Register the generated TypeAdapter BEFORE opening the box
     Hive.registerAdapter(CardModelAdapter());
