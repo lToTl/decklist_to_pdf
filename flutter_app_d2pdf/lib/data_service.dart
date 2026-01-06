@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -7,6 +8,8 @@ const String _kCardBox = 'scryfall_cards_box';
 Box<CardModel> cardBox = Hive.box<CardModel>(_kCardBox);
 
 class CardDataService {
+  static bool isScryfallDownloadComplete = false;
+
   // --- Initialization and One-Time Save Logic ---
 
   static Future<void> initializeAndLoadData(
@@ -26,6 +29,11 @@ class CardDataService {
     if (cardBox.isNotEmpty) {
       print('Data already saved to Hive. Skipping JSON parsing.');
       return;
+    }
+
+    // Wait for Scryfall download to complete if it's in progress
+    while (!isScryfallDownloadComplete) {
+      await Future.delayed(const Duration(milliseconds: 100));
     }
 
     // --- ONE-TIME SLOW PARSING AND FAST BINARY SAVING ---

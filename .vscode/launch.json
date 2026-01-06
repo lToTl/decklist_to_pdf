@@ -9,24 +9,6 @@
             "type": "dart",
             "request": "launch",
             "program": "lib/main.dart"
-        },
-        {
-            "name": "Dart",
-            "type": "dart",
-            "request": "launch",
-            "program": "bin/main.dart"
-        },
-        {
-            "name": "decklist_to_pdf",
-            "request": "launch",
-            "type": "dart",
-            "program": "decklist_to_pdf.dart",
-            "args": [
-                "--input",
-                "test_deck.txt",
-                "--output",
-                "test_deck.pdf"
-            ]
         }
     ]
 }

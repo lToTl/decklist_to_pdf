@@ -170,31 +170,36 @@ class DecklistToPdfCore {
   }
 
   Future<String> fetchBulkJson({bool ask = true}) async {
-    final headers = <String, String>{
-      'User-Agent': conf['user_agent'].toString(),
-      'Accept': conf['accept'].toString(),
-    };
-    final meta = await http.get(
-      Uri.parse('https://api.scryfall.com/bulk-data/default-cards'),
-      headers: headers,
-    );
-    if (meta.statusCode != 200) {
-      throw Exception('Failed to fetch bulk metadata');
-    }
-    final metaJson = jsonDecode(meta.body) as Map<String, dynamic>;
-    final bulkUri = metaJson['download_uri'] as String;
-    final basename = p.basename(bulkUri);
-    final local = p.join('scryfall_bulk_json', basename);
-    await Directory(p.dirname(local)).create(recursive: true);
-    if (!File(local).existsSync()) {
-      final resp = await http.get(Uri.parse(bulkUri), headers: headers);
-      if (resp.statusCode != 200) {
-        throw Exception('Failed to download bulk json');
+    CardDataService.isScryfallDownloadComplete = false;
+    try {
+      final headers = <String, String>{
+        'User-Agent': conf['user_agent'].toString(),
+        'Accept': conf['accept'].toString(),
+      };
+      final meta = await http.get(
+        Uri.parse('https://api.scryfall.com/bulk-data/default-cards'),
+        headers: headers,
+      );
+      if (meta.statusCode != 200) {
+        throw Exception('Failed to fetch bulk metadata');
       }
-      File(local).writeAsBytesSync(resp.bodyBytes);
+      final metaJson = jsonDecode(meta.body) as Map<String, dynamic>;
+      final bulkUri = metaJson['download_uri'] as String;
+      final basename = p.basename(bulkUri);
+      final local = p.join('scryfall_bulk_json', basename);
+      await Directory(p.dirname(local)).create(recursive: true);
+      if (!File(local).existsSync()) {
+        final resp = await http.get(Uri.parse(bulkUri), headers: headers);
+        if (resp.statusCode != 200) {
+          throw Exception('Failed to download bulk json');
+        }
+        File(local).writeAsBytesSync(resp.bodyBytes);
+      }
+      conf['bulk_json_path'] = local;
+      return local;
+    } finally {
+      CardDataService.isScryfallDownloadComplete = true;
     }
-    conf['bulk_json_path'] = local;
-    return local;
   }
 
   Map<String, dynamic> loadCardDictionary(String filepath) {
