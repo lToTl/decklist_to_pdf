@@ -32,6 +32,9 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/scryfall_bulk_json/
+/image_cache/
+
 
 # Symbolication related
 app.*.symbols
